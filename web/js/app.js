@@ -665,8 +665,8 @@ function renderTabBody() {
           <input class="inp" id="cmd-input" placeholder="命令（↑↓ 切换历史，回车发送）" onkeydown="if(event.key==='Enter')sendCmd();cmdHistKey(event)">
           <button class="btn primary" onclick="sendCmd()">发送</button>
         </div>
-        <div class="mt" id="quickcmd-box">
-          ${quickCmds().map(c => `<button class="btn small ghost" style="margin:0 6px 6px 0" onclick="quickCmd('${c.cmd.replace(/'/g, "\\'")}')">${esc(c.label)}</button>`).join('')}
+        <div class="mt" id="quickcmd-box" style="display:flex;flex-wrap:wrap;align-items:center">
+          ${quickCmdButtons()}
         </div>
       </div>`;
     connectWsConsole();
@@ -2346,19 +2346,74 @@ async function drawMetrics() {
 
 /* ----- 快捷命令 ----- */
 
+/* 四游戏内置快捷命令库：group 分组渲染；ask=true 的命令点按后弹参数输入 */
+const QUICK_CMDS = {
+  minecraft: [
+    { g: '日常' },
+    { label: '在线列表', cmd: 'list' },
+    { label: '存档', cmd: 'save-all' },
+    { label: '白名单', cmd: 'whitelist list' },
+    { label: '难度', cmd: 'difficulty' },
+    { g: '时间与天气' },
+    { label: '☀️ 晴天', cmd: 'weather clear' },
+    { label: '🌧 下雨', cmd: 'weather rain' },
+    { label: '雷暴', cmd: 'weather thunder' },
+    { label: '正午', cmd: 'time set noon' },
+    { label: '午夜', cmd: 'time set midnight' },
+    { label: '🌅 日出', cmd: 'time set day' },
+    { label: '跳过夜晚', cmd: 'time add 12000' },
+    { g: '维护' },
+    { label: '踢出玩家', cmd: 'kick ', ask: '玩家名' },
+    { label: '封禁玩家', cmd: 'ban ', ask: '玩家名' },
+    { label: '白名单加人', cmd: 'whitelist add ', ask: '玩家名' },
+    { label: '发广播', cmd: 'say ', ask: '广播内容' },
+    { label: '给物品', cmd: 'give @p ', ask: '物品ID 数量（如 diamond 64）' },
+    { label: '传送玩家', cmd: 'tp ', ask: '玩家名 目标玩家' }
+  ],
+  dst: [
+    { g: '日常' },
+    { label: '帮助', cmd: 'help' },
+    { label: '在线列表', cmd: 'c_listall()' },
+    { g: '世界' },
+    { label: '回档1天', cmd: 'c_rollback(1)' },
+    { label: '回档2天', cmd: 'c_rollback(2)' },
+    { label: '重生成世界', cmd: 'c_regenerateworld()' },
+    { label: '保存世界', cmd: 'c_save()' },
+    { label: '设为白天', cmd: 'c_setphase("day")' },
+    { label: '设为夜晚', cmd: 'c_setphase("night")' },
+    { g: '玩家' },
+    { label: '复活玩家', cmd: 'c_resurrect(', ask: '玩家名（补右括号）' },
+    { label: '发公告', cmd: 'c_announce(', ask: '公告内容（补右括号）' }
+  ],
+  terraria: [
+    { g: '日常' },
+    { label: '在线玩家', cmd: 'playing' },
+    { label: '保存世界', cmd: 'save' },
+    { label: '服务器信息', cmd: 'info' },
+    { g: '管理' },
+    { label: '踢出玩家', cmd: 'kick ', ask: '玩家名' },
+    { label: '封禁玩家', cmd: 'ban ', ask: '玩家名' },
+    { label: '解封', cmd: 'unban ', ask: '玩家名' },
+    { label: '开启事件', cmd: 'invade' },
+    { g: '时间' },
+    { label: '正午', cmd: 'time noon' },
+    { label: '午夜', cmd: 'time midnight' }
+  ],
+  zomboid: [
+    { g: '日常' },
+    { label: '玩家列表', cmd: 'players' },
+    { label: '广播', cmd: 'servermsg "', ask: '广播内容（自动补引号）', suffix: '"' },
+    { g: '管理' },
+    { label: '踢出', cmd: 'kickuser "', ask: '玩家名（自动补引号）', suffix: '"' },
+    { label: '封禁', cmd: 'banuser "', ask: '玩家名（自动补引号）', suffix: '"' },
+    { label: '解封', cmd: 'unbanuser "', ask: '玩家名（自动补引号）', suffix: '"' },
+    { label: '添加OP', cmd: 'adduser "', ask: '玩家名 "管理员权限（自动补引号）', suffix: '" "true"' }
+  ]
+};
+
 function quickCmds() {
   if (!CUR) return [];
-  let list = [];
-  if (CUR.game === 'minecraft') {
-    list = [
-      { label: '在线列表', cmd: 'list' },
-      { label: '存档', cmd: 'save-all' },
-      { label: '白名单', cmd: 'whitelist list' },
-      { label: '难度', cmd: 'difficulty' }
-    ];
-  } else {
-    list = [{ label: '帮助', cmd: 'help' }];
-  }
+  let list = (QUICK_CMDS[CUR.game] || [{ label: '帮助', cmd: 'help' }]).slice();
   // 用户自定义（追加在内置之后，按游戏持久化）
   try {
     const custom = JSON.parse(localStorage.getItem('gp_quick_' + CUR.game) || '[]');
@@ -2371,8 +2426,7 @@ function quickCmds() {
 function drawQuickCmds() {
   const box = $('#quickcmd-box');
   if (!box || !CUR) return;
-  box.innerHTML = quickCmds().map(c =>
-    `<button class="btn small ghost" style="margin:0 6px 6px 0" onclick="quickCmd('${c.cmd.replace(/'/g, "\\'")}')">${esc(c.label)}</button>`).join('');
+  box.innerHTML = quickCmdButtons();
 }
 
 /* 自定义快捷命令编辑器 */
@@ -2419,9 +2473,54 @@ function qcDel(i) {
   drawQuickCmds();
 }
 
-function quickCmd(cmd) {
+/* 分组按钮渲染：g 项 = 小节标题 */
+function quickCmdButtons() {
+  return quickCmds().map(c => {
+    if (c.g) return `<span class="muted" style="font-size:11px;margin:8px 6px 2px;font-weight:600">${esc(c.g)}</span>`;
+    const cmdJs = JSON.stringify(c.cmd).replace(/"/g, '&quot;');
+    const askJs = c.ask ? JSON.stringify(c.ask).replace(/"/g, '&quot;') : 'null';
+    const sufJs = c.suffix ? JSON.stringify(c.suffix).replace(/"/g, '&quot;') : 'null';
+    return `<button class="btn small ghost" style="margin:2px 6px 2px 0" onclick="quickCmdFull(${cmdJs}, ${askJs}, ${sufJs})">${esc(c.label)}</button>`;
+  }).join('');
+}
+
+/* 无参命令直接发；带 ask 的弹参数输入（suffix 自动补全引号/括号） */
+function quickCmdFull(cmd, ask, suffix) {
+  if (!ask) { quickCmd(cmd); return; }
+  window.__quickBase = cmd;
+  window.__quickSuffix = suffix || '';
+  modal('命令参数', `
+    <div class="form-row">
+      <label>${esc(ask)}</label>
+      <input class="inp mono" id="quick-arg" autofocus>
+    </div>
+    <div class="muted" style="font-size:12px;margin-bottom:10px">将发送：<span class="mono" id="quick-preview"></span></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal()">取消</button>
+      <button class="btn primary" onclick="quickCmdSend()">发送</button>
+    </div>`);
+  const input = $('#quick-arg');
+  const preview = () => { $('#quick-preview').textContent = window.__quickBase + input.value + window.__quickSuffix; };
+  input.oninput = preview;
+  input.onkeydown = e => { if (e.key === 'Enter') quickCmdSend(); };
+  preview();
+  input.focus();
+}
+
+async function quickCmdSend() {
+  const arg = $('#quick-arg').value.trim();
+  if (!arg) { toast('请输入参数', 'err'); return; }
+  const full = window.__quickBase + arg + window.__quickSuffix;
+  closeModal();
+  await quickCmd(full);
+}
+
+async function quickCmd(cmd) {
   if (!CUR) { toast('请先从列表打开实例详情', 'err'); return; }
- $('#cmd-input').value = cmd; sendCmd(); }
+  const r = await api(`/instances/${CUR.id}/command`, { method: 'POST', body: { cmd } });
+  toast(r.msg, r.code === 0 ? 'ok' : 'err');
+  if (CUR_TAB === 'console') setTimeout(() => loadConsole(false), 800);
+}
 
 async function downloadRec(rid) {
   if (!CUR) { toast('请先从列表打开实例详情', 'err'); return; }
