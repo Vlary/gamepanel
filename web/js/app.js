@@ -455,14 +455,29 @@ function renderTabBody() {
     return;
   }
   if (CUR_TAB === 'console') {
+    consoleFilter = '';
+    consoleAutoScroll = true;
+    consoleNewCount = 0;
+    consoleBuf = [];
     box.innerHTML = `
       <div class="card">
-        <div class="console-box" id="console-out">正在建立实时连接…</div>
+        <div class="console-toolbar">
+          <input class="inp" id="console-filter" placeholder="🔍 过滤日志（关键字高亮）…" oninput="consoleFilterInput(this.value)" style="flex:1">
+          <span class="muted mono" id="console-count" style="font-size:12px;white-space:nowrap">0 行</span>
+          <button class="btn small" onclick="consoleExport()" title="导出当前日志（含过滤）">⬇ 导出</button>
+          <button class="btn small ghost" onclick="editQuickCmds()" title="自定义快捷命令">⚙ 快捷命令</button>
+        </div>
+        <div style="position:relative">
+          <div class="console-box" id="console-out" onscroll="consoleScrolled(this)">正在建立实时连接…</div>
+          <button class="btn small console-float hidden" id="console-float" onclick="consoleGoBottom()">↓ 回到底部</button>
+        </div>
         <div class="console-input">
           <input class="inp" id="cmd-input" placeholder="命令（↑↓ 切换历史，回车发送）" onkeydown="if(event.key==='Enter')sendCmd();cmdHistKey(event)">
           <button class="btn primary" onclick="sendCmd()">发送</button>
         </div>
-        ${quickCmds().map(c => `<button class="btn small ghost" style="margin:6px 6px 0 0" onclick="quickCmd('${c.cmd}')">${c.label}</button>`).join('')}
+        <div class="mt" id="quickcmd-box">
+          ${quickCmds().map(c => `<button class="btn small ghost" style="margin:0 6px 6px 0" onclick="quickCmd('${c.cmd.replace(/'/g, "\\'")}')">${esc(c.label)}</button>`).join('')}
+        </div>
       </div>`;
     connectWsConsole();
   }
@@ -483,18 +498,113 @@ function closeWsConsole() {
   if (wsConsole) { try { wsConsole.close(); } catch (e) {} wsConsole = null; }
 }
 
+/* ----- 控制台缓冲模型：行数组 + 上限裁剪 + 过滤高亮 + 智能滚动 ----- */
+
+const CONSOLE_MAX_LINES = 2000;
+let consoleBuf = [];
+let consoleFilter = '';
+let consoleAutoScroll = true;     // 用户上滚即暂停，滚回底部自动恢复
+let consoleNewCount = 0;          // 暂停期间积累的新行数
+
+function appendConsole(text) {
+  const lines = String(text).split('\n');
+  for (const l of lines) consoleBuf.push(l);
+  if (consoleBuf.length > CONSOLE_MAX_LINES) consoleBuf = consoleBuf.slice(-CONSOLE_MAX_LINES);
+  if (!consoleAutoScroll) consoleNewCount += lines.length;
+  renderConsole(false);
+}
+
+/* 单行转义 + 关键字高亮（先定位后转义，避免过滤器含特殊字符失配） */
+function hlLine(line, q) {
+  if (!q) return esc(line);
+  let out = '';
+  let i = 0;
+  const low = line.toLowerCase();
+  const ql = q.toLowerCase();
+  while (i <= line.length) {
+    const idx = low.indexOf(ql, i);
+    if (idx < 0) { out += esc(line.slice(i)); break; }
+    out += esc(line.slice(i, idx)) + '<mark>' + esc(line.slice(idx, idx + q.length)) + '</mark>';
+    i = idx + q.length;
+  }
+  return out;
+}
+
+/* ANSI 颜色转义序列剥离（终端日志常见，留着会显示成乱码字面量） */
+function stripAnsi(l) { return l.replace(/\x1b\[[0-9;]*m/g, ''); }
+
+function renderConsole(scrollBottom) {
+  const box = $('#console-out');
+  if (!box) return;
+  const q = consoleFilter.trim();
+  const cleaned = consoleBuf.map(stripAnsi);
+  const lines = q ? cleaned.filter(l => l.toLowerCase().includes(q.toLowerCase())) : cleaned;
+  // 保留滚动位置：过滤/新行到达时若非自动滚动模式不跳动
+  const keepTop = box.scrollTop;
+  box.innerHTML = lines.map(l => '<span class="c-line">' + (l ? hlLine(l, q) : '&nbsp;') + '</span>').join('\n');
+  if (scrollBottom || consoleAutoScroll) {
+    box.scrollTop = box.scrollHeight;
+  } else {
+    box.scrollTop = keepTop;
+  }
+  const fb = $('#console-float');
+  if (fb) {
+    fb.classList.toggle('hidden', consoleAutoScroll);
+    fb.textContent = consoleNewCount > 0 ? `↓ ${consoleNewCount} 行新日志` : '↓ 回到底部';
+  }
+  const cnt = $('#console-count');
+  if (cnt) cnt.textContent = q ? `${lines.length}/${consoleBuf.length} 行` : `${consoleBuf.length} 行`;
+}
+
+/* 用户滚动：距底 40px 内恢复自动滚动，之上暂停 */
+function consoleScrolled(el) {
+  const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+  if (atBottom && !consoleAutoScroll) {
+    consoleAutoScroll = true;
+    consoleNewCount = 0;
+    renderConsole(true);
+  } else if (!atBottom && consoleAutoScroll) {
+    consoleAutoScroll = false;
+    // 暂停自动滚动时立即刷新浮标显示（renderConsole 保持滚动位置不跳动）
+    renderConsole(false);
+  }
+}
+
+function consoleGoBottom() {
+  consoleAutoScroll = true;
+  consoleNewCount = 0;
+  renderConsole(true);
+}
+
+function consoleFilterInput(v) {
+  consoleFilter = v;
+  renderConsole(false);
+}
+
+/* 导出当前缓冲（应用过滤）为文本文件 */
+function consoleExport() {
+  const q = consoleFilter.trim();
+  const lines = q ? consoleBuf.filter(l => l.toLowerCase().includes(q.toLowerCase())) : consoleBuf;
+  const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `console-${(CUR ? CUR.name : 'log').replace(/[^\w\u4e00-\u9fa5-]+/g, '_')}-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.log`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  toast(`已导出 ${lines.length} 行日志`, 'ok');
+}
+
 function connectWsConsole() {
   closeWsConsole();
   try {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     wsConsole = new WebSocket(`${proto}//${location.host}/api/v1/instances/${CUR.id}/ws-console?token=${TOKEN}`);
     wsConsole.onopen = () => {
-      const box = $('#console-out');
-      if (box) box.textContent = '';
+      consoleBuf = [];
+      renderConsole(true);
     };
     wsConsole.onmessage = e => {
-      const box = $('#console-out');
-      if (box) { box.textContent += e.data; box.scrollTop = box.scrollHeight; }
+      appendConsole(e.data);
     };
     wsConsole.onclose = () => {
       wsConsole = null;
@@ -519,10 +629,10 @@ async function loadConsole(first) {
   if (CUR_TAB !== 'console') return;
   if (wsConsole && wsConsole.readyState === 1) return;   // 实时流在线，无需轮询
   const r = await api(`/instances/${CUR.id}/logs?tail=300`);
-  const box = $('#console-out');
-  if (box && r.code === 0) {
-    box.textContent = r.data.logs || '（暂无日志）';
-    if (first || window.__autoScroll) box.scrollTop = box.scrollHeight;
+  if (r.code === 0) {
+    consoleBuf = String(r.data.logs || '（暂无日志）').split('\n');
+    if (consoleBuf.length > CONSOLE_MAX_LINES) consoleBuf = consoleBuf.slice(-CONSOLE_MAX_LINES);
+    renderConsole(first);
   }
   if (!consoleTimer) consoleTimer = setInterval(() => loadConsole(false), 2500);
 }
@@ -1574,17 +1684,76 @@ async function drawMetrics() {
 /* ----- 快捷命令 ----- */
 
 function quickCmds() {
-  if (!CUR) { toast('请先从列表打开实例详情', 'err'); return; }
-
+  if (!CUR) return [];
+  let list = [];
   if (CUR.game === 'minecraft') {
-    return [
+    list = [
       { label: '在线列表', cmd: 'list' },
       { label: '存档', cmd: 'save-all' },
       { label: '白名单', cmd: 'whitelist list' },
       { label: '难度', cmd: 'difficulty' }
     ];
+  } else {
+    list = [{ label: '帮助', cmd: 'help' }];
   }
-  return [{ label: '帮助', cmd: 'help' }];
+  // 用户自定义（追加在内置之后，按游戏持久化）
+  try {
+    const custom = JSON.parse(localStorage.getItem('gp_quick_' + CUR.game) || '[]');
+    list = list.concat(custom.filter(c => c && c.label && c.cmd));
+  } catch (e) {}
+  return list;
+}
+
+/* 只重绘快捷命令按钮区，不打断控制台连接 */
+function drawQuickCmds() {
+  const box = $('#quickcmd-box');
+  if (!box || !CUR) return;
+  box.innerHTML = quickCmds().map(c =>
+    `<button class="btn small ghost" style="margin:0 6px 6px 0" onclick="quickCmd('${c.cmd.replace(/'/g, "\\'")}')">${esc(c.label)}</button>`).join('');
+}
+
+/* 自定义快捷命令编辑器 */
+function editQuickCmds() {
+  if (!CUR) return;
+  let custom = [];
+  try { custom = JSON.parse(localStorage.getItem('gp_quick_' + CUR.game) || '[]'); } catch (e) {}
+  const draw = (items) => modal('自定义快捷命令（' + (CUR.game) + '）', `
+    <div class="form-inline" style="align-items:flex-end">
+      <div class="form-row" style="flex:0 0 40%"><label>按钮文字</label><input class="inp" id="qc-label" placeholder="如：晴天"></div>
+      <div class="form-row"><label>命令</label><input class="inp mono" id="qc-cmd" placeholder="如 weather clear"></div>
+      <button class="btn primary" style="flex:0 0 auto;margin-bottom:14px" onclick="qcAdd()">添加</button>
+    </div>
+    ${items.length ? `<table class="tbl"><tr><th>文字</th><th>命令</th><th></th></tr>${items.map((c, i) => `
+      <tr><td>${esc(c.label)}</td><td class="mono">${esc(c.cmd)}</td>
+      <td><button class="btn small danger" onclick="qcDel(${i})">删除</button></td></tr>`).join('')}</table>`
+      : '<div class="empty-tip">还没有自定义命令，把常用命令做成一键按钮</div>'}
+    <div class="kv-note" style="margin-top:14px">保存在浏览器本地（localStorage），只影响当前浏览器的「${esc(CUR.game)}」控制台。</div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal()">关闭</button>
+    </div>`);
+  window.__qcDraw = draw;
+  draw(custom);
+}
+
+function qcAdd() {
+  const label = ($('#qc-label') || {}).value || '';
+  const cmd = ($('#qc-cmd') || {}).value || '';
+  if (!label.trim() || !cmd.trim()) { toast('文字和命令都要填', 'err'); return; }
+  let custom = [];
+  try { custom = JSON.parse(localStorage.getItem('gp_quick_' + CUR.game) || '[]'); } catch (e) {}
+  custom.push({ label: label.trim(), cmd: cmd.trim() });
+  localStorage.setItem('gp_quick_' + CUR.game, JSON.stringify(custom));
+  window.__qcDraw(custom);
+  drawQuickCmds();
+}
+
+function qcDel(i) {
+  let custom = [];
+  try { custom = JSON.parse(localStorage.getItem('gp_quick_' + CUR.game) || '[]'); } catch (e) {}
+  custom.splice(i, 1);
+  localStorage.setItem('gp_quick_' + CUR.game, JSON.stringify(custom));
+  window.__qcDraw(custom);
+  drawQuickCmds();
 }
 
 function quickCmd(cmd) {

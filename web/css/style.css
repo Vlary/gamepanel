@@ -349,3 +349,15 @@ input.inp:focus, select.inp:focus, textarea.inp:focus { border-color: var(--prim
   .modal { width: 96vw; padding: 16px; }
   .game-pick { grid-template-columns: 1fr; }
 }
+
+/* ---------- 控制台工具栏与浮标 ---------- */
+.console-toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
+.console-toolbar .inp { padding: 6px 10px; }
+.console-box { position: relative; }
+.console-box mark { background: var(--amber-soft); color: var(--amber); border-radius: 3px; padding: 0 2px; }
+.c-line { display: inline; }
+.console-float {
+  position: absolute; right: 18px; bottom: 14px;
+  background: var(--primary); color: #fff; border: none;
+  box-shadow: var(--shadow-lg); animation: fadein .2s;
+}
