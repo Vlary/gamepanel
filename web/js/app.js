@@ -1647,9 +1647,18 @@ async function renderTasks() {
   const [tr, ir] = await Promise.all([api('/tasks'), api('/instances')]);
   if (tr.code !== 0 || ir.code !== 0) return;
   const tasks = tr.data;
+  TASK_CACHE = tasks;
   const insts = ir.data;
   const nameOf = id => { const i = insts.find(x => x.id === id); return i ? `${i.icon} ${i.name}` : '(实例已删除)'; };
   const actionText = a => (ACTIONS.find(x => x[0] === a) || ['', a])[1];
+  const lastRunHtml = t => {
+    const h = (t.history || []);
+    if (!h.length) return '<span class="muted">未执行</span>';
+    const last = h[h.length - 1];
+    return last.ok
+      ? `<span class="badge badge-ok">成功</span> <span class="muted" style="font-size:12px">${esc(last.time)}</span>`
+      : `<span class="badge bad">失败</span> <span class="muted" style="font-size:12px" title="${esc(last.msg)}">${esc(last.time)}</span>`;
+  };
   const rows = tasks.map(t => `
     <tr>
       <td>${esc(t.name)}</td>
@@ -1658,9 +1667,12 @@ async function renderTasks() {
       <td>${actionText(t.action)}${t.action === 'command' ? `：${esc(t.command)}` : ''}</td>
       <td>${t.action === 'backup' || t.action === 'snapshot' ? `保留 ${t.keepCount} 份` : '-'}</td>
       <td>${t.enabled ? `<span class="dot running"></span>启用` : '<span class="dot exited"></span>停用'}</td>
+      <td>${lastRunHtml(t)}</td>
       <td class="muted">${esc(t.nextRun || '-')}</td>
       <td>
         <button class="btn small" onclick="runTaskNow('${t.id}')">执行</button>
+        <button class="btn small" onclick="showTaskDialog('${t.id}')">编辑</button>
+        ${(t.history || []).length ? `<button class="btn small" onclick="taskHistory('${t.id}')">历史</button>` : ''}
         <button class="btn small" onclick="toggleTask('${t.id}', ${!t.enabled})">${t.enabled ? '停用' : '启用'}</button>
         <button class="btn small danger" onclick="delTask('${t.id}')">删除</button>
       </td>
@@ -1672,36 +1684,95 @@ async function renderTasks() {
         <button class="btn primary" onclick="showTaskDialog()">＋ 新建任务</button>
       </div>
       ${tasks.length ? `<table class="tbl">
-        <tr><th>名称</th><th>实例</th><th>cron</th><th>动作</th><th>保留</th><th>状态</th><th>下次运行</th><th>操作</th></tr>${rows}</table>`
-      : '<div class="empty-tip">暂无计划任务</div>'}
+        <tr><th>名称</th><th>实例</th><th>cron</th><th>动作</th><th>保留</th><th>状态</th><th>最近执行</th><th>下次运行</th><th>操作</th></tr>${rows}</table>`
+      : emptyState('⏰', '暂无计划任务', '让备份与重启自动发生', '<button class="btn primary" onclick="showTaskDialog()">＋ 新建任务</button>')}
     </div>
     <div class="card muted" style="font-size:13px">
       cron 为五段表达式「分 时 日 月 周」，例如：<span class="mono">0 4 * * *</span> 每天 4 点；<span class="mono">*/30 * * * *</span> 每 30 分钟；<span class="mono">0 */6 * * *</span> 每 6 小时。
     </div>`;
 }
 
-function showTaskDialog() {
+/* 任务执行历史弹窗 */
+function taskHistory(tid) {
+  const t = TASK_CACHE.find(x => x.id === tid);
+  if (!t) return;
+  const h = (t.history || []).slice().reverse();
+  modal(`📜 ${esc(t.name)} · 执行历史（最近 ${h.length} 次）`, `
+    ${h.length ? `<table class="tbl"><tr><th>时间</th><th>结果</th><th>说明</th></tr>${h.map(e => `
+      <tr>
+        <td class="mono" style="white-space:nowrap">${esc(e.time)}</td>
+        <td>${e.ok ? '<span class="badge badge-ok">成功</span>' : '<span class="badge bad">失败</span>'}</td>
+        <td class="muted" style="font-size:12px">${esc(e.msg)}</td>
+      </tr>`).join('')}</table>` : '<div class="empty-tip">暂无记录</div>'}
+    <div class="modal-actions"><button class="btn" onclick="closeModal()">关闭</button></div>`);
+}
+
+let TASK_CACHE = [];
+const TASK_TEMPLATES = [
+  { label: '🌙 每日 4 点备份', cron: '0 4 * * *', action: 'backup' },
+  { label: '⚡ 每小时快照', cron: '0 * * * *', action: 'snapshot' },
+  { label: '🔄 每周一 5 点重启', cron: '0 5 * * 1', action: 'restart' },
+  { label: '🛡 每 6 小时存档', cron: '0 */6 * * *', action: 'command' }
+];
+let cronPreviewTimer = null;
+
+function showTaskDialog(editId) {
   api('/instances').then(r => {
     if (r.code !== 0) return;
     const insts = r.data;
     if (insts.length === 0) { toast('请先创建实例', 'err'); return; }
-    modal('新建计划任务', `
-      <div class="form-row"><label>任务名称</label><input class="inp" id="tk-name" placeholder="如：每日自动备份"></div>
+    const t = editId ? TASK_CACHE.find(x => x.id === editId) : null;
+    window.__taskEditId = editId || null;
+    modal(t ? '编辑计划任务' : '新建计划任务', `
+      <div class="form-row"><label>常用模板</label>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          ${TASK_TEMPLATES.map(tp => `<button class="btn small" onclick="applyTaskTemplate('${tp.cron}','${tp.action}')">${tp.label}</button>`).join('')}
+        </div>
+      </div>
+      <div class="form-row"><label>任务名称</label><input class="inp" id="tk-name" value="${t ? esc(t.name) : ''}" placeholder="如：每日自动备份"></div>
       <div class="form-inline">
         <div class="form-row"><label>目标实例</label>
-          <select class="inp" id="tk-inst">${insts.map(i => `<option value="${i.id}">${esc(i.name)}</option>`).join('')}</select></div>
+          <select class="inp" id="tk-inst">${insts.map(i => `<option value="${i.id}" ${t && t.instanceId === i.id ? 'selected' : ''}>${esc(i.name)}</option>`).join('')}</select></div>
         <div class="form-row"><label>动作</label>
-          <select class="inp" id="tk-action" onchange="taskActionChange()">${ACTIONS.map(([k, t]) => `<option value="${k}">${t}</option>`).join('')}</select></div>
+          <select class="inp" id="tk-action" onchange="taskActionChange()">${ACTIONS.map(([k, txt]) => `<option value="${k}" ${t && t.action === k ? 'selected' : ''}>${txt}</option>`).join('')}</select></div>
       </div>
-      <div class="form-row"><label>cron 表达式（分 时 日 月 周）</label><input class="inp mono" id="tk-cron" value="0 4 * * *"></div>
-      <div class="form-row" id="tk-cmd-row" style="display:none"><label>命令内容</label><input class="inp mono" id="tk-cmd" placeholder="如 say 服务器即将重启"></div>
-      <div class="form-row" id="tk-keep-row"><label>备份/快照保留份数</label><input class="inp" id="tk-keep" type="number" value="7"></div>
+      <div class="form-row"><label>cron 表达式（分 时 日 月 周）</label>
+        <input class="inp mono" id="tk-cron" value="${t ? esc(t.cron) : '0 4 * * *'}" oninput="cronPreviewInput(this.value)"></div>
+      <div class="form-row"><label>未来执行预览</label>
+        <div id="tk-preview" class="muted mono" style="font-size:12px;min-height:18px">输入 cron 后自动校验并预览</div></div>
+      <div class="form-row" id="tk-cmd-row" style="display:none"><label>命令内容</label><input class="inp mono" id="tk-cmd" value="${t ? esc(t.command) : ''}" placeholder="如 say 服务器即将重启"></div>
+      <div class="form-row" id="tk-keep-row"><label>备份/快照保留份数</label><input class="inp" id="tk-keep" type="number" value="${t ? t.keepCount : 7}"></div>
       <div class="modal-actions">
         <button class="btn" onclick="closeModal()">取消</button>
-        <button class="btn primary" onclick="createTask()">创建</button>
+        <button class="btn primary" onclick="createTask()">${t ? '保存' : '创建'}</button>
       </div>`);
     taskActionChange();
+    if (t) cronPreviewInput(t.cron);
   });
+}
+
+function applyTaskTemplate(cron, action) {
+  $('#tk-cron').value = cron;
+  $('#tk-action').value = action;
+  taskActionChange();
+  cronPreviewInput(cron);
+}
+
+/* cron 实时校验 + 未来 5 次执行预览（防抖 400ms） */
+function cronPreviewInput(v) {
+  if (cronPreviewTimer) clearTimeout(cronPreviewTimer);
+  const box = $('#tk-preview');
+  if (!box) return;
+  const expr = v.trim();
+  if (!expr) { box.textContent = '输入 cron 后自动校验并预览'; return; }
+  cronPreviewTimer = setTimeout(async () => {
+    const r = await api('/cron-preview?expr=' + encodeURIComponent(expr)).catch(() => null);
+    if (!r || r.code !== 0 || !$('#tk-preview')) {
+      if ($('#tk-preview')) $('#tk-preview').innerHTML = '<span style="color:var(--red)">✕ 表达式不合法（五段：分 时 日 月 周）</span>';
+      return;
+    }
+    $('#tk-preview').innerHTML = '<span style="color:var(--green)">✓</span> ' + r.data.runs.map(x => esc(x.replace(/\d{4}-/, ''))).join(' → ');
+  }, 400);
 }
 
 function taskActionChange() {
@@ -1719,9 +1790,12 @@ async function createTask() {
     command: $('#tk-cmd').value,
     keepCount: parseInt($('#tk-keep').value) || 7
   };
-  const r = await api('/tasks', { method: 'POST', body });
+  const editId = window.__taskEditId;
+  const r = editId
+    ? await api(`/tasks/${editId}`, { method: 'PUT', body })
+    : await api('/tasks', { method: 'POST', body });
   toast(r.msg, r.code === 0 ? 'ok' : 'err');
-  if (r.code === 0) { closeModal(); renderTasks(); }
+  if (r.code === 0) { closeModal(); window.__taskEditId = null; renderTasks(); }
 }
 
 async function runTaskNow(id) {

@@ -287,6 +287,30 @@ public class Scheduler {
             case Some(e) => println("[sched] 任务 ${t.name} 执行失败: ${e}")
             case None => ()
         }
+        // 执行历史（环形 20 条，随任务持久化，重启不丢）
+        let okFlag = err == None
+        let msg = match (err) {
+            case Some(e) => if (e.size > 120) { e[..120] } else { e }
+            case None => "成功"
+        }
+        Store.update({ d =>
+            match (d.findTask(t.id)) {
+                case Some(cur) =>
+                    cur.history.add(Jsons.obj([
+                        ("time", JsonString(Instances.nowStr())),
+                        ("ok", JsonBool(okFlag)),
+                        ("msg", JsonString(msg))
+                    ]))
+                    if (cur.history.size() > 20) {
+                        let kept = JsonArray()
+                        for (i in 1..cur.history.size()) {
+                            kept.add(cur.history[i])
+                        }
+                        cur.history = kept
+                    }
+                case None => ()
+            }
+        })
         // 备份/快照类动作执行保留策略
         if (t.action == "backup" || t.action == "snapshot") {
             Backups.prune(t.instanceId, t.action, t.keepCount)
@@ -297,6 +321,32 @@ public class Scheduler {
 /* ---------------- REST 路由 ---------------- */
 
 public func registerTaskRoutes(): Unit {
+    /* cron 未来运行预览：?expr=0 4 * * *（URL 编码），返回未来 5 次执行时间 */
+    router.get("/api/v1/cron-preview", { ctx, _ =>
+        if (!Auth.guard(ctx)) {
+            return
+        }
+        let expr = queryParam(ctx, "expr")
+        match (Cron.parse(expr)) {
+            case Some(c) =>
+                var cur = DateTime.now()
+                let runs = JsonArray()
+                for (_ in 0..5) {
+                    match (c.nextAfter(cur)) {
+                        case Some(nx) =>
+                            runs.add(JsonString(nx.format("yyyy-MM-dd HH:mm:ss")))
+                            cur = nx
+                        case None => break
+                    }
+                }
+                HttpUtil.ok(ctx, Jsons.obj([
+                    ("valid", JsonBool(true)),
+                    ("runs", runs)
+                ]))
+            case None => HttpUtil.fail(ctx, 5001, "cron 表达式不合法（五段：分 时 日 月 周）")
+        }
+    })
+
     router.get("/api/v1/tasks", { ctx, _ =>
         if (!Auth.guard(ctx)) {
             return

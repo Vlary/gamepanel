@@ -160,6 +160,7 @@ public class TaskItem {
     public var createdAt = ""
     public var lastRun = ""
     public var nextRun = ""
+    public var history = JsonArray()   // 最近执行记录 [{time,ok,msg}]，环形 20 条
 
     public init() {}
 
@@ -175,7 +176,8 @@ public class TaskItem {
             ("keepCount", JsonInt(keepCount)),
             ("createdAt", JsonString(createdAt)),
             ("lastRun", JsonString(lastRun)),
-            ("nextRun", JsonString(nextRun))
+            ("nextRun", JsonString(nextRun)),
+            ("history", history)
         ])
     }
 
@@ -192,6 +194,10 @@ public class TaskItem {
         t.createdAt = HttpUtil.str(o, "createdAt", "")
         t.lastRun = HttpUtil.str(o, "lastRun", "")
         t.nextRun = HttpUtil.str(o, "nextRun", "")
+        match (o.get("history")) {
+            case Some(h) => if (HttpUtil.kindIs(h, JsonKind.JsArray)) { t.history = h.asArray() }
+            case None => ()
+        }
         return t
     }
 }
