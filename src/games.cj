@@ -151,17 +151,30 @@ public class Games {
             [
                 GameVersion("latest", "最新正式版（含洞穴）", "jamesits/dst-server:latest", [])
             ],
-            ["storage"],
-            "mods",
+            ["DoNotStarveTogether/Cluster_1"],
+            "DoNotStarveTogether/Cluster_1/mods",
             "必须到 Klei 账户页申请集群令牌（Cluster Token）后填入 extraEnv 的 DST_CLUSTER_TOKEN 才能开服",
             [
-                ConfigField("storage/cluster.ini", "ini", "GAMEPLAY.game_mode", "游戏模式", "select",
-                    [("survival", "生存"), ("endless", "无尽"), ("wilderness", "荒野")], "survival", ""),
-                ConfigField("storage/cluster.ini", "ini", "GAMEPLAY.pvp", "允许 PVP", "toggle", [], "false", ""),
-                ConfigField("storage/cluster.ini", "ini", "GAMEPLAY.pause_when_empty", "无人时暂停", "toggle", [], "true", ""),
-                ConfigField("storage/cluster.ini", "ini", "NETWORK.max_players", "最大玩家数", "number", [], "6", "饥荒建议 ≤ 10"),
-                ConfigField("storage/cluster.ini", "ini", "NETWORK.cluster_name", "服务器名称", "text", [], "GamePanel DST", "客户端服务器列表里显示的名字"),
-                ConfigField("storage/cluster.ini", "ini", "NETWORK.cluster_description", "服务器描述", "text", [], "", "")
+                // ---- 服务器信息 ----
+                ConfigField("DoNotStarveTogether/Cluster_1/cluster.ini", "ini", "NETWORK.cluster_name", "服务器名称", "text", [], "GamePanel DST", "客户端服务器列表里显示的名字", "服务器信息"),
+                ConfigField("DoNotStarveTogether/Cluster_1/cluster.ini", "ini", "NETWORK.cluster_description", "服务器描述", "text", [], "", "列表里名称下方的简介", "服务器信息"),
+                ConfigField("DoNotStarveTogether/Cluster_1/cluster.ini", "ini", "NETWORK.cluster_password", "进服密码", "text", [], "", "留空则无密码", "服务器信息"),
+                ConfigField("DoNotStarveTogether/Cluster_1/cluster.ini", "ini", "NETWORK.cluster_language", "服务器语言", "select",
+                    [("zh", "中文"), ("en", "英文"), ("auto", "自动")], "zh", "影响客户端列表的地区筛选", "服务器信息"),
+                // ---- 游戏性 ----
+                ConfigField("DoNotStarveTogether/Cluster_1/cluster.ini", "ini", "GAMEPLAY.game_mode", "游戏模式", "select",
+                    [("survival", "生存"), ("endless", "无尽"), ("wilderness", "荒野")], "survival", "无尽模式无复活上限（复活雕像），适合长线经营", "游戏性"),
+                ConfigField("DoNotStarveTogether/Cluster_1/cluster.ini", "ini", "GAMEPLAY.pvp", "允许 PVP", "toggle", [], "false", "", "游戏性"),
+                ConfigField("DoNotStarveTogether/Cluster_1/cluster.ini", "ini", "GAMEPLAY.pause_when_empty", "无人时暂停", "toggle", [], "true", "开启省资源且时间不流逝", "游戏性"),
+                ConfigField("DoNotStarveTogether/Cluster_1/cluster.ini", "ini", "GAMEPLAY.vote_enabled", "允许玩家投票踢人", "toggle", [], "true", "", "游戏性"),
+                ConfigField("DoNotStarveTogether/Cluster_1/cluster.ini", "ini", "GAMEPLAY.autosaver", "自动存档器", "toggle", [], "true", "游戏内每天自动保存", "游戏性"),
+                ConfigField("DoNotStarveTogether/Cluster_1/cluster.ini", "ini", "GAMEPLAY.max_wildfires", "野火上限", "number", [], "15", "防夏季野火蔓延烧家", "游戏性"),
+                // ---- 网络 ----
+                ConfigField("DoNotStarveTogether/Cluster_1/cluster.ini", "ini", "NETWORK.max_players", "最大玩家数", "number", [], "6", "饥荒建议 ≤ 10", "网络"),
+                ConfigField("DoNotStarveTogether/Cluster_1/cluster.ini", "ini", "NETWORK.tick_rate", "同步频率（Hz）", "number", [], "15", "15=官方默认；30 更流畅但更耗带宽", "网络"),
+                ConfigField("DoNotStarveTogether/Cluster_1/cluster.ini", "ini", "NETWORK.whitelist_slots", "白名单预留位", "number", [], "0", "为白名单玩家保留的连接位", "网络"),
+                ConfigField("DoNotStarveTogether/Cluster_1/cluster.ini", "ini", "NETWORK.cluster_intention", "服务器意图标签", "select",
+                    [("cooperative", "合作"), ("social", "社交"), ("competitive", "竞争"), ("madness", "疯狂")], "cooperative", "列表筛选用", "网络")
             ]
         ))
 

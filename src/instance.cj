@@ -547,6 +547,200 @@ func mcWorldsJson(ins: Instance): JsonObject {
     ])
 }
 
+/* ---------------- 饥荒 DST 分片与世界预设 ---------------- */
+
+/*
+ * 分片识别：storage/ 下含 server.ini 的目录（Master 地面 / Caves 洞穴 / 自定义分片）。
+ * 洞穴启停通过目录移入/移出 storage_disabled/ 实现（镜像只扫 storage/）。
+ */
+func dstShardsJson(ins: Instance): JsonObject {
+    let storage = ins.dataDir + "/DoNotStarveTogether/Cluster_1"
+    let disabled = ins.dataDir + "/DoNotStarveTogether/Cluster_1_disabled"
+    let shards = JsonArray()
+    func scan(base: String, enabledNow: Bool): Unit {
+        if (!exists(base)) {
+            return
+        }
+        try {
+            for (de in Directory.readFrom(base)) {
+                if (!de.isDirectory() || !exists(base + "/" + de.name + "/server.ini")) {
+                    continue
+                }
+                let label = match (de.name) {
+                    case "Master" => "地面世界（Master）"
+                    case "Caves" => "洞穴世界（Caves）"
+                    case _ => de.name
+                }
+                shards.add(Jsons.obj([
+                    ("name", JsonString(de.name)),
+                    ("label", JsonString(label)),
+                    ("enabled", JsonBool(enabledNow)),
+                    ("caves", JsonBool(de.name == "Caves"))
+                ]))
+            }
+        } catch (_: Exception) {
+            ()
+        }
+    }
+    scan(storage, true)
+    scan(disabled, false)
+    return Jsons.obj([("shards", shards)])
+}
+
+/* worldgenoverride.lua 预设模板（作用于下次重生成世界） */
+let DST_WORLDGEN_PRESETS = ArrayList<(String, String, String)>()   // (key, 名称, lua 内容或空=删除)
+
+func initDstPresets(): Unit {
+    if (DST_WORLDGEN_PRESETS.size > 0) {
+        return
+    }
+    DST_WORLDGEN_PRESETS.add(("default", "官方默认（清除覆盖）", ""))
+    DST_WORLDGEN_PRESETS.add(("long-autumn", "长秋温和",
+        "return {\n  override_enabled = true,\n  preset = \"forest\",\n  misc = { season_start = \"autumn\", autumn = \"verylongseason\", winter = \"short\" }\n}\n"))
+    DST_WORLDGEN_PRESETS.add(("eternal-winter", "永冬挑战",
+        "return {\n  override_enabled = true,\n  preset = \"forest\",\n  misc = { season_start = \"winter\", winter = \"verylongseason\", summer = \"short\" }\n}\n"))
+    DST_WORLDGEN_PRESETS.add(("rich-resources", "资源茂盛",
+        "return {\n  override_enabled = true,\n  preset = \"forest\",\n  misc = { resources = \"often\", autumn = \"long\" }\n}\n"))
+}
+
+func applyDstWorldgen(ins: Instance, shard: String, presetKey: String): ?String {
+    initDstPresets()
+    if (shard == "" || shard.contains("/") || shard.contains("..")) {
+        return Some("非法分片名")
+    }
+    let shardDir = ins.dataDir + "/DoNotStarveTogether/Cluster_1/" + shard
+    if (!exists(shardDir)) {
+        return Some("分片不存在: ${shard}")
+    }
+    var lua = ""
+    var hit = false
+    for (item in DST_WORLDGEN_PRESETS) {
+        let (k, _, content) = item
+        if (k == presetKey) {
+            lua = content
+            hit = true
+            break
+        }
+    }
+    if (!hit) {
+        return Some("未知预设")
+    }
+    let target = shardDir + "/worldgenoverride.lua"
+    try {
+        if (lua == "") {
+            if (exists(target)) {
+                remove(target)
+            }
+        } else {
+            File.writeTo(target, lua.toArray())
+        }
+        return None
+    } catch (e: Exception) {
+        return Some("写入失败: ${e.message}")
+    }
+}
+
+public func registerDstRoutes(): Unit {
+    router.get("/api/v1/instances/{id}/dst-shards", { ctx, md =>
+        if (!Auth.guard(ctx)) {
+            return
+        }
+        match (Instances.findOr404(ctx, md.matchString("id"))) {
+            case Some(ins) =>
+                if (ins.game != "dst") {
+                    HttpUtil.fail(ctx, 4500, "仅饥荒 DST 提供分片管理")
+                    return
+                }
+                initDstPresets()
+                let presets = JsonArray()
+                for (item2 in DST_WORLDGEN_PRESETS) {
+        let (k, name) = (item2[0], item2[1])
+                    presets.add(Jsons.obj([("key", JsonString(k)), ("name", JsonString(name))]))
+                }
+                let o = dstShardsJson(ins)
+                o.put("presets", presets)
+                HttpUtil.ok(ctx, o)
+            case None => ()
+        }
+    })
+
+    /* 分片启停：enabled=false 移入 storage_disabled/，true 移回 storage/ */
+    router.post("/api/v1/instances/{id}/dst-shards/{name}/toggle", { ctx, md =>
+        if (!Auth.guard(ctx) || !Auth.allowAdmin(ctx)) {
+            return
+        }
+        match (Instances.findOr404(ctx, md.matchString("id"))) {
+            case Some(ins) =>
+                if (ins.game != "dst") {
+                    HttpUtil.fail(ctx, 4500, "仅饥荒 DST 提供分片管理")
+                    return
+                }
+                if (Docker.status(ins.containerName(), node: ins.node) == "running") {
+                    HttpUtil.fail(ctx, 4501, "请先停止实例再切换分片")
+                    return
+                }
+                let name = md.matchString("name")
+                if (name == "Master") {
+                    HttpUtil.fail(ctx, 4502, "地面世界（Master）不可停用")
+                    return
+                }
+                if (name == "" || name.contains("/") || name.contains("..")) {
+                    HttpUtil.fail(ctx, 4503, "非法分片名")
+                    return
+                }
+                let enabled = HttpUtil.boolean(HttpUtil.bodyJson(ctx), "enabled", true)
+                let storage = ins.dataDir + "/DoNotStarveTogether/Cluster_1"
+                let disabled = ins.dataDir + "/DoNotStarveTogether/Cluster_1_disabled"
+                let from = (if (enabled) { disabled } else { storage }) + "/" + name
+                let toDir = if (enabled) { storage } else { disabled }
+                if (!exists(from)) {
+                    HttpUtil.fail(ctx, 4504, "分片目录不存在")
+                    return
+                }
+                try {
+                    if (!exists(toDir)) {
+                        Directory.create(toDir, recursive: true)
+                    }
+                    rename(from, to: toDir + "/" + name, overwrite: true)
+                    match (Auth.current(ctx)) {
+                        case Some(u) => Users.audit(u.username, "DST 分片 ${name} ${if (enabled) { "启用" } else { "停用" }} @ ${ins.name}")
+                        case None => ()
+                    }
+                    HttpUtil.okMsg(ctx, "分片 ${name} 已${if (enabled) { "启用" } else { "停用" }}，启动实例后生效")
+                } catch (e: Exception) {
+                    HttpUtil.fail(ctx, 4505, "切换失败: ${e.message}")
+                }
+            case None => ()
+        }
+    })
+
+    /* 世界生成预设：写入分片的 worldgenoverride.lua（下次重生成世界生效） */
+    router.post("/api/v1/instances/{id}/dst-shards/{name}/worldgen", { ctx, md =>
+        if (!Auth.guard(ctx) || !Auth.allowAdmin(ctx)) {
+            return
+        }
+        match (Instances.findOr404(ctx, md.matchString("id"))) {
+            case Some(ins) =>
+                if (ins.game != "dst") {
+                    HttpUtil.fail(ctx, 4500, "仅饥荒 DST 提供分片管理")
+                    return
+                }
+                let body = HttpUtil.bodyJson(ctx)
+                let preset = HttpUtil.str(body, "preset", "default")
+                match (applyDstWorldgen(ins, md.matchString("name"), preset)) {
+                    case None =>
+                        match (Auth.current(ctx)) {
+                            case Some(u) => Users.audit(u.username, "DST 世界预设 ${preset} @ ${ins.name}")
+                            case None => ()
+                        }
+                        HttpUtil.okMsg(ctx, "预设已写入，重新生成世界后生效（控制台 c_regenerateworld 或删档重来）")
+                    case Some(e) => HttpUtil.fail(ctx, 4506, e)
+                }
+            case None => ()
+        }
+    })
+}
+
 public func registerWorldRoutes(): Unit {
     router.get("/api/v1/instances/{id}/worlds", { ctx, md =>
         if (!Auth.guard(ctx)) {

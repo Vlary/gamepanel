@@ -1471,6 +1471,11 @@ async function renderSettings() {
       <h3>🌍 世界管理 <span id="eula-badge" class="badge"></span></h3>
       <div id="worlds-body" class="empty-tip">加载中…</div>
     </div>` : ''}
+    ${i.game === 'dst' ? `
+    <div class="card">
+      <h3>🔥 分片与世界预设</h3>
+      <div id="dst-shards-body" class="empty-tip">加载中…</div>
+    </div>` : ''}
     <div class="card">
       <h3>基本设置（保存后自动重建容器，数据不受影响）</h3>
       <div class="form-row"><label>实例名称</label><input class="inp" id="set-name" value="${esc(i.name)}"></div>
@@ -1500,6 +1505,45 @@ async function renderSettings() {
     </div>`;
   loadGameCfg();
   if (i.game === 'minecraft') loadWorlds();
+  if (i.game === 'dst') loadDstShards();
+}
+
+/* ----- 饥荒 DST 分片与世界预设 ----- */
+async function loadDstShards() {
+  const box = $('#dst-shards-body');
+  if (!box) return;
+  const r = await api(`/instances/${CUR.id}/dst-shards`);
+  if (!box) return;
+  if (r.code !== 0) { box.textContent = r.msg; return; }
+  const d = r.data;
+  const rows = (d.shards || []).map(sh => `
+    <tr>
+      <td><b>${esc(sh.label)}</b></td>
+      <td>${sh.enabled ? '<span class="badge badge-ok">启用</span>' : '<span class="badge badge-off">停用</span>'}</td>
+      <td style="display:flex;gap:6px;flex-wrap:wrap">
+        ${sh.name !== 'Master' && ME.role === 'admin' ? `<button class="btn small" onclick="dstToggleShard('${esc(sh.name)}', ${!sh.enabled})">${sh.enabled ? '停用' : '启用'}</button>` : sh.name === 'Master' ? '<span class="muted" style="font-size:12px">主分片不可停</span>' : ''}
+        <select class="inp" style="width:auto;padding:4px 8px;font-size:12px" onchange="dstWorldgen('${esc(sh.name)}', this.value)">
+          <option value="">🌍 世界生成预设…</option>
+          ${(d.presets || []).map(p => `<option value="${esc(p.key)}">${esc(p.name)}</option>`).join('')}
+        </select>
+      </td>
+    </tr>`).join('');
+  box.innerHTML = (d.shards || []).length
+    ? `<table class="tbl"><tr><th>分片</th><th>状态</th><th>操作</th></tr>${rows}</table>
+       <div class="muted" style="font-size:12px;margin-top:8px">洞穴分片停用 = 移出扫描目录（数据保留，可随时启用）；世界预设写入 worldgenoverride.lua，需重新生成世界生效（控制台 c_regenerateworld）。</div>`
+    : emptyState('🔥', '尚未生成分片', '启动实例后自动创建地面（Master）与洞穴（Caves）分片');
+}
+
+async function dstToggleShard(name, enabled) {
+  const r = await api(`/instances/${CUR.id}/dst-shards/${name}/toggle`, { method: 'POST', body: { enabled } });
+  toast(r.msg, r.code === 0 ? 'ok' : 'err');
+  if (r.code === 0) setTimeout(loadDstShards, 600);
+}
+
+async function dstWorldgen(name, preset) {
+  if (!preset) return;
+  const r = await api(`/instances/${CUR.id}/dst-shards/${name}/worldgen`, { method: 'POST', body: { preset } });
+  toast(r.msg, r.code === 0 ? 'ok' : 'err');
 }
 
 /* ----- Minecraft 世界管理 ----- */
