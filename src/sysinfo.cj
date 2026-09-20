@@ -220,6 +220,151 @@ func splitWs(line: String): ArrayList<String> {
     return out
 }
 
+/* ---------------- 运维诊断 ---------------- */
+
+/*
+ * 数据目录明细：按实例目录 + 归档/监控等占用分解（admin）
+ * du 逐目录执行，目录多时秒级耗时，前端加载态兜底
+ */
+func storageJson(): JsonObject {
+    let insts = JsonArray()
+    var instKB: Int64 = 0
+    for (ins in Store.data().instances) {
+        let kb = dirSizeKB(ins.dataDir)
+        instKB += kb
+        insts.add(Jsons.obj([
+            ("id", JsonString(ins.id)),
+            ("name", JsonString(ins.name)),
+            ("game", JsonString(ins.game)),
+            ("sizeKB", JsonInt(kb))
+        ]))
+    }
+    let root = Config.dataRoot
+    func sub(name: String): Int64 {
+        let p = root + "/" + name
+        if (exists(p)) {
+            return dirSizeKB(p)
+        }
+        return 0
+    }
+    let backupsKB = sub("backups")
+    let snapshotsKB = sub("snapshots")
+    var metricsKB: Int64 = 0
+    if (exists(root + "/metrics.json")) {
+        metricsKB = dirSizeKB(root + "/metrics.json")
+    }
+    let totalKB = dirSizeKB(root)
+    return Jsons.obj([
+        ("totalKB", JsonInt(totalKB)),
+        ("instances", insts),
+        ("instancesKB", JsonInt(instKB)),
+        ("backupsKB", JsonInt(backupsKB)),
+        ("snapshotsKB", JsonInt(snapshotsKB)),
+        ("metricsKB", JsonInt(metricsKB)),
+        ("otherKB", JsonInt(totalKB - instKB - backupsKB - snapshotsKB - metricsKB))
+    ])
+}
+
+/*
+ * 一键健康自检（admin）：Docker/磁盘/端口冲突/关键文件/TUN，返回检查项数组
+ */
+func healthReportJson(): JsonArray {
+    let arr = JsonArray()
+    func item(name: String, ok: Bool, detail: String) {
+        arr.add(Jsons.obj([
+            ("item", JsonString(name)),
+            ("ok", JsonBool(ok)),
+            ("detail", JsonString(detail))
+        ]))
+    }
+    // 1. Docker 可用
+    let dv = dockerVersionCached()
+    item("Docker 守护进程", dv != "", if (dv != "") { "版本 ${dv}" } else { "docker 命令不可用或守护进程未运行" })
+    // 2. 磁盘余量（<5GB 警告）
+    let availGB = Float64.parse(diskAvailBytes(Config.dataRoot).toString()) / 1073741824.0
+    let availTxt = "${Int64(availGB)} GB"
+    item("磁盘余量", availGB >= 5.0, availTxt + (if (availGB < 5.0) { "（不足 5GB，备份可能失败）" } else { "" }))
+    // 3. 实例端口冲突（同宿主端口被多个实例声明）
+    let portMap = HashMap<String, Int64>()
+    for (ins in Store.data().instances) {
+        if (ins.ports.size > 0) {
+            portMap.add(ins.ports[0].split(":")[0], (portMap.get(ins.ports[0].split(":")[0]) ?? 0) + 1)
+        }
+    }
+    var dupPorts = ArrayList<String>()
+    for ((port, cnt) in portMap) {
+        if (cnt > 1) {
+            dupPorts.add(port)
+        }
+    }
+    item("端口冲突", dupPorts.size == 0, if (dupPorts.size == 0) { "无重复声明" } else { "重复端口: " + stringJoin(dupPorts, ", ") })
+    // 4. 运行中实例的容器实际状态
+    var runningCnt: Int64 = 0
+    for (ins in Store.data().instances) {
+        if (Docker.status(ins.containerName(), node: ins.node) == "running") {
+            runningCnt += 1
+        }
+    }
+    item("实例容器", true, "运行中 ${runningCnt} / 共 ${Store.data().instances.size}")
+    // 5. 数据目录可写
+    var writable = false
+    try {
+        let probe = Config.dataRoot + "/.gp-probe"
+        File.writeTo(probe, "ok".toArray())
+        writable = exists(probe)
+        if (writable) {
+            try {
+                remove(probe)
+            } catch (_: Exception) {
+                ()
+            }
+        }
+    } catch (_: Exception) {
+        writable = false
+    }
+    item("数据目录可写", writable, if (writable) { Config.dataRoot } else { "${Config.dataRoot} 无法写入" })
+    // 6. TUN 设备（组网依赖）
+    item("TUN 设备", exists("/dev/net/tun"), if (exists("/dev/net/tun")) { "/dev/net/tun 存在（EasyTier 可用 TUN 模式）" } else { "缺失，EasyTier 将降级 --no-tun" })
+    // 7. 计划任务健康
+    var enabledCnt: Int64 = 0
+    for (t in Store.data().tasks) {
+        if (t.enabled) {
+            enabledCnt += 1
+        }
+    }
+    item("计划任务", true, "启用 ${enabledCnt} / 共 ${Store.data().tasks.size}")
+    return arr
+}
+
+func stringJoin(list: ArrayList<String>, sep: String): String {
+    let sb = StringBuilder()
+    var first = true
+    for (x in list) {
+        if (!first) {
+            sb.append(sep)
+        }
+        sb.append(x)
+        first = false
+    }
+    return sb.toString()
+}
+
+public func registerDiagRoutes(): Unit {
+    router.get("/api/v1/storage", { ctx, _ =>
+        if (!Auth.guard(ctx) || !Auth.allowAdmin(ctx)) {
+            return
+        }
+        HttpUtil.ok(ctx, storageJson())
+    })
+
+    router.get("/api/v1/health-report", { ctx, _ =>
+        if (!Auth.guard(ctx) || !Auth.allowAdmin(ctx)) {
+            return
+        }
+        HttpUtil.ok(ctx, healthReportJson())
+    })
+}
+
 /* ---------------- 静态资源 ---------------- */
 
 func mimeOf(name: String): String {

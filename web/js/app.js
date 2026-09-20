@@ -242,6 +242,7 @@ function switchView(view) {
   if (view === 'tasks') renderTasks();
   if (view === 'about') renderAbout();
   if (view === 'users') renderUsers();
+  if (view === 'diag') renderDiag();
   if (view === 'mesh') renderMesh();
 }
 
@@ -2283,6 +2284,66 @@ async function doImport() {
   const r = await api('/instances/import', { method: 'POST', body: { container, name: $('#imp-name').value.trim() } });
   toast(r.msg, r.code === 0 ? 'ok' : 'err');
   if (r.code === 0) { closeModal(); renderInstances(); }
+}
+
+/* ---------------- 系统诊断（admin） ---------------- */
+
+async function renderDiag() {
+  $('#main').innerHTML = skeletonRows(4);
+  const [hr, st] = await Promise.all([
+    api('/health-report').catch(() => ({ code: -1 })),
+    api('/storage').catch(() => ({ code: -1 }))
+  ]);
+  let healthCard = '<div class="card">健康自检不可用</div>';
+  if (hr.code === 0) {
+    const items = hr.data || [];
+    const okCnt = items.filter(x => x.ok).length;
+    healthCard = `
+    <div class="card">
+      <h3 style="display:flex;justify-content:space-between;align-items:center">
+        <span>🩺 健康自检</span>
+        <span class="badge ${okCnt === items.length ? 'badge-ok' : 'badge-warn'}">${okCnt}/${items.length} 通过</span>
+      </h3>
+      <table class="tbl">
+        <tr><th style="width:44px"></th><th>检查项</th><th>详情</th></tr>
+        ${items.map(x => `
+        <tr>
+          <td>${x.ok ? '<span style="color:var(--green);font-size:16px">✓</span>' : '<span style="color:var(--red);font-size:16px">✕</span>'}</td>
+          <td><b>${esc(x.item)}</b></td>
+          <td class="muted">${esc(x.detail)}</td>
+        </tr>`).join('')}
+      </table>
+    </div>`;
+  }
+  let storageCard = '';
+  if (st.code === 0) {
+    const d = st.data;
+    const insts = (d.instances || []).slice().sort((a, b) => b.sizeKB - a.sizeKB);
+    const cat = [
+      ['实例数据', d.instancesKB, 'var(--primary)'],
+      ['备份归档', d.backupsKB, 'var(--violet)'],
+      ['快照归档', d.snapshotsKB, 'var(--green)'],
+      ['监控/其他', (d.metricsKB || 0) + (d.otherKB || 0), 'var(--muted)']
+    ];
+    const tot = Math.max(1, d.totalKB || 1);
+    storageCard = `
+    <div class="card">
+      <h3>💾 数据目录明细（共 ${fmtSize(d.totalKB * 1024)}）</h3>
+      <div class="progress" style="height:14px;display:flex;border-radius:7px;overflow:hidden;margin-bottom:14px">
+        ${cat.filter(([_, kb]) => kb > 0).map(([n, kb, c]) => `<div title="${n} ${fmtSize(kb * 1024)}" style="width:${(kb / tot * 100).toFixed(1)}%;background:${c}"></div>`).join('')}
+      </div>
+      <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:12px;margin-bottom:12px">
+        ${cat.map(([n, kb, c]) => `<span><span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:${c};margin-right:5px"></span>${n} ${fmtSize(kb * 1024)}</span>`).join('')}
+      </div>
+      ${insts.length ? `<table class="tbl"><tr><th>实例</th><th>占用</th><th style="width:40%"></th></tr>
+        ${insts.map(i => `<tr>
+          <td><b>${esc(i.name)}</b> <span class="muted">(${esc(i.game)})</span></td>
+          <td class="mono">${fmtSize(i.sizeKB * 1024)}</td>
+          <td><div class="progress"><div style="width:${(i.sizeKB / tot * 100).toFixed(1)}%"></div></div></td>
+        </tr>`).join('')}</table>` : '<div class="empty-tip">暂无实例</div>'}
+    </div>`;
+  }
+  $('#main').innerHTML = healthCard + storageCard;
 }
 
 /* ---------------- 用户管理（admin） ---------------- */
