@@ -179,6 +179,52 @@ async function logout() {
   showLogin();
 }
 
+/* ---------------- 全局快捷键与帮助 ---------------- */
+
+const SHORTCUTS = [
+  ['1 – 6', '切换导航页（总览/实例/任务/组网/用户/诊断）'],
+  ['/', '聚焦实例搜索框'],
+  ['n', '新建实例（打开创建向导）'],
+  ['?', '显示本帮助'],
+  ['Esc', '关闭弹窗 / 通知面板'],
+  ['↑ ↓', '控制台内切换命令历史']
+];
+
+function showHelp() {
+  modal('⌨️ 键盘快捷键', `
+    <table class="tbl">
+      ${SHORTCUTS.map(([k, d]) => `<tr><td class="mono" style="white-space:nowrap"><b>${esc(k)}</b></td><td class="muted">${esc(d)}</td></tr>`).join('')}
+    </table>
+    <div class="kv-note" style="margin-top:14px">输入框获得焦点时快捷键自动失效（不打字干扰）。</div>
+    <div class="modal-actions"><button class="btn" onclick="closeModal()">知道了</button></div>`);
+}
+
+/* 全局键盘路由：输入态不打扰 */
+document.addEventListener('keydown', e => {
+  const tag = (document.activeElement?.tagName || '').toLowerCase();
+  const typing = tag === 'input' || tag === 'textarea' || tag === 'select';
+  if (e.key === 'Escape') {
+    if ($('#modal-root').innerHTML.trim()) { closeModal(); return; }
+    const np = $('#notify-panel');
+    if (np) np.remove();
+    return;
+  }
+  if (typing || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.key === '?') { showHelp(); return; }
+  if (e.key === '/') {
+    const search = $('input[placeholder^="🔍 搜索实例"]');
+    if (search) { e.preventDefault(); search.focus(); }
+    return;
+  }
+  if (e.key === 'n') { showCreateDialog(); return; }
+  const navKeys = { '1': 'overview', '2': 'instances', '3': 'tasks', '4': 'mesh', '5': 'users', '6': 'diag' };
+  const v = navKeys[e.key];
+  if (v) {
+    if ((v === 'users' || v === 'diag') && ME.role !== 'admin') { toast('该页面仅管理员可见', ''); return; }
+    switchView(v);
+  }
+});
+
 /* ---------------- 通知中心 ---------------- */
 
 let notifyTimer = null;

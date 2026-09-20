@@ -91,6 +91,35 @@ cron 为五段表达式「分 时 日 月 周」，支持 `*`、`*/n`、`a-b`、
 
 后台每 30 秒采样 peer 表：节点上下线产生 `events` 记录（环形 200 条，`et-stats.json` 持久化），rx/tx 计数器增量累计入 `traffic`（对端重连计数器回退自动续算）。`peerNotify: true` 时上下线经 `GP_NOTIFY_URL` 推送 `peer_join`/`peer_leave`。
 
+## 诊断与运维（admin）
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/health-report` | 一键健康自检 7 项（Docker/磁盘/端口冲突/容器/目录可写/TUN/任务） |
+| GET | `/storage` | 数据目录明细（按实例 du 占用 + 备份/快照/监控分类） |
+| GET | `/port-check?port=` | 端口预检：实例对比 + /proc 系统级 LISTEN |
+| GET | `/cron-preview?expr=` | cron 校验 + 未来 5 次执行时间 |
+
+## 安全与会话
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/auth/change-password` | 自助改密。body：`oldPassword/newPassword`（新密码 ≥8 位） |
+| GET | `/sessions` | 在线会话列表（token 打码前 8 位 + 用户/角色/过期，admin） |
+| DELETE | `/sessions/{prefix}` | 踢出会话（按 token 前 8 位，admin） |
+
+登录失败限速：同用户名 5 次失败锁定 15 分钟（code 1002，msg 含剩余时间）。
+
+## 通知中心
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/notifications` | 列表（倒序）+ 未读数；事件源：实例意外退出/任务失败/组网玩家动态 |
+| POST | `/notifications/read-all` | 全部标记已读 |
+| POST | `/notifications/clear` | 清空通知 |
+
+任务对象新增 `history`（执行记录，环形 20 条）；实例记录接口新增 `GET /records/{rid}/preview`（归档文件清单，前 300 条）。
+
 ## 错误码段
 
 | 段 | 含义 |
