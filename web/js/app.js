@@ -581,6 +581,7 @@ function renderDetail() {
   ];
   if (i.game === 'minecraft') tabs.splice(1, 0, ['players', '玩家']);
   $('#main').innerHTML = `
+    ${firstRunTipHtml(i)}
     <div class="card">
       <div class="inst-head">
         <button class="btn ghost small" style="margin-right:6px" onclick="backToList()">← 返回</button>
@@ -2345,6 +2346,22 @@ async function drawMetrics() {
 }
 
 /* ----- 快捷命令 ----- */
+
+/* 首启引导：实例创建后 15 分钟内且未就绪时在详情页顶部显示 */
+const FIRST_RUN_TIPS = {
+  minecraft: '⛏ 首次启动需下载服务端核心（1-3 分钟），控制台出现「Done」即就绪；接受 EULA 后方可开服。',
+  dst: '🔥 需要 Klei 集群令牌：到 Klei 账户页申请后填入设置页的环境变量 DST_CLUSTER_TOKEN，否则开服即退。地面+洞穴双分片首次启动较慢。',
+  terraria: '🌳 首次启动自动生成中等世界（1-2 分钟）；TShock 初始管理码在数据目录 setup-code.txt，进服输入 /setup <码> 绑定管理员。',
+  zomboid: '🧟 LGSM 首次启动自动安装服务端（数 GB 下载，10-20 分钟）；安装完成后 Server/ 目录生成，沙盒难度预设与游戏配置在设置页。'
+};
+
+function firstRunTipHtml(i) {
+  const tip = FIRST_RUN_TIPS[i.game];
+  if (!tip || i.ready) return '';
+  const created = Date.parse((i.createdAt || '').replace(' ', 'T'));
+  if (!created || Date.now() - created > 15 * 60 * 1000) return '';
+  return `<div class="kv-note">${tip}</div>`;
+}
 
 /* 四游戏内置快捷命令库：group 分组渲染；ask=true 的命令点按后弹参数输入 */
 const QUICK_CMDS = {

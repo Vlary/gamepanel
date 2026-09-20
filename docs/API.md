@@ -110,6 +110,22 @@ cron 为五段表达式「分 时 日 月 周」，支持 `*`、`*/n`、`a-b`、
 
 登录失败限速：同用户名 5 次失败锁定 15 分钟（code 1002，msg 含剩余时间）。
 
+## 按游戏定制接口
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/instances/{id}/worlds` | MC 世界列表 + EULA 状态 |
+| POST | `/instances/{id}/worlds/{name}/reset` | MC 单世界重置（admin，需停止，自动保护备份） |
+| GET | `/instances/{id}/dst-shards` | DST 分片列表 + 世界预设列表 |
+| POST | `/instances/{id}/dst-shards/{name}/toggle` | DST 分片启停（admin，需停止；Master 不可停） |
+| POST | `/instances/{id}/dst-shards/{name}/worldgen` | DST 世界生成预设写入（body：preset） |
+| GET | `/instances/{id}/terraria-worlds` | 泰拉瑞亚 .wld 世界列表 |
+| POST | `/instances/{id}/terraria-worlds/select` | 切换当前世界（admin，body：file） |
+| GET | `/instances/{id}/pz-presets` | PZ 沙盒预设列表 |
+| POST | `/instances/{id}/pz-presets/{key}/apply` | 应用沙盒预设（admin） |
+
+game-config 接口的字段现含 group（分组渲染）；实例列表/详情新增 ready 字段（游戏就绪检测）。
+
 ## 通知中心
 
 | 方法 | 路径 | 说明 |
