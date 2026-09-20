@@ -120,6 +120,18 @@
 |---|---|
 | ![手机](docs/screenshots/10-mobile-dark.png) | ![手机控制台](docs/screenshots/11-mobile-console.png) |
 
+## 测试体系（五轮全量覆盖）
+
+| 层 | 命令 | 覆盖 |
+|---|---|---|
+| 单元测试（36） | `cjpm test` | cron/路径安全/JSON/配置读写（properties/ini/json）/世界与分片识别/DST 预设/表格解析/ID 唯一性等纯逻辑 |
+| API 全端点（69） | `python3 scripts/api_test.py` | 鉴权（401/限速/改密）/三级角色权限/参数校验/生命周期/文件穿越拦截/跨游戏接口拒绝矩阵 |
+| MC 全生命周期 E2E（34） | `python3 scripts/e2e_test.py` | 创建→就绪→配置重启生效→RCON 白名单落盘→快照恢复闭环→世界重置→任务历史→回显→清理（数据完整性断言） |
+| 四游戏定制矩阵（35） | `python3 scripts/games_test.py` | MC 世界/EULA、DST 分片启停+世界预设、泰拉瑞亚世界切换、PZ 沙盒预设（真容器） |
+| UI 走查 | 浏览器 | 全导航页/详情 8 tab/快捷键/401 过期回登录/移动端 375px 零溢出 |
+
+API/E2E/矩阵脚本默认连 `127.0.0.1:8090`，需先以隔离数据目录启动面板（`GP_DATA=/tmp/xx ./scripts/run.sh`）；可用 `GP_TEST_BASE`/`GP_TEST_DATA` 覆盖。
+
 ## 快速开始
 
 ### 1. 环境准备
