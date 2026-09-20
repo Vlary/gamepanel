@@ -51,12 +51,77 @@ function api(path, opts = {}) {
   });
 }
 
+/* ---------------- 主题 ---------------- */
+
+const THEMES = [
+  { key: 'auto', icon: '🌓', label: '跟随系统' },
+  { key: 'light', icon: '☀️', label: '浅色' },
+  { key: 'dark', icon: '🌙', label: '暗色' }
+];
+let themeIdx = THEMES.findIndex(t => t.key === (localStorage.getItem('gp_theme') || 'auto'));
+if (themeIdx < 0) themeIdx = 0;
+
+function applyTheme() {
+  const t = THEMES[themeIdx];
+  const dark = t.key === 'dark' || (t.key === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
+  if (dark) document.documentElement.setAttribute('data-theme', 'dark');
+  else document.documentElement.removeAttribute('data-theme');
+  localStorage.setItem('gp_theme', t.key);
+  const btn = $('#theme-btn');
+  if (btn) { btn.textContent = t.icon; btn.title = '主题：' + t.label + '（点击切换）'; }
+}
+
+function cycleTheme() {
+  themeIdx = (themeIdx + 1) % THEMES.length;
+  applyTheme();
+  toast('主题：' + THEMES[themeIdx].label, '');
+}
+
+/* 系统主题变化时，auto 模式实时跟随 */
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+  if (THEMES[themeIdx].key === 'auto') applyTheme();
+});
+
+/* ---------------- 骨架屏 / 空状态 ---------------- */
+
+function skeletonRows(n = 4) {
+  let out = '';
+  for (let i = 0; i < n; i++) {
+    out += `<div class="skeleton-row">
+      <div class="skeleton skel-avatar"></div>
+      <div style="flex:1"><div class="skeleton skel-title"></div><div class="skeleton skel-line"></div></div>
+      <div class="skeleton" style="width:70px;height:22px"></div>
+    </div>`;
+  }
+  return `<div class="card"><div class="skeleton skel-title" style="width:130px;height:18px;margin-bottom:6px"></div>${out}</div>`;
+}
+
+function skeletonCards(n = 4) {
+  let out = '';
+  for (let i = 0; i < n; i++) out += '<div class="skeleton skel-card"></div>';
+  return `<div class="grid cards">${out}</div>`;
+}
+
+function emptyState(icon, title, desc, actionHtml = '') {
+  return `<div class="empty-state">
+    <div class="es-icon">${icon}</div>
+    <div class="es-title">${esc(title)}</div>
+    ${desc ? `<div class="es-desc">${esc(desc)}</div>` : ''}
+    ${actionHtml ? `<div class="es-action">${actionHtml}</div>` : ''}
+  </div>`;
+}
+
+/* ---------------- toast ---------------- */
+
 function toast(msg, type = '') {
+  const ico = type === 'ok' ? '✓' : type === 'err' ? '✕' : 'ℹ';
   const el = document.createElement('div');
   el.className = 'toast ' + type;
-  el.textContent = msg;
+  el.innerHTML = `<span class="t-ico">${ico}</span><span></span>`;
+  el.lastElementChild.textContent = msg;
   $('#toast-root').appendChild(el);
-  setTimeout(() => el.remove(), 2600);
+  const life = type === 'err' ? 4200 : 2600;
+  setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 260); }, life);
 }
 
 function esc(s) {
@@ -120,8 +185,12 @@ async function refreshTop() {
   if (r.code !== 0) return;
   const d = r.data;
   $('#top-stats').textContent = `实例 ${d.instanceCount} · 运行中 ${d.runningCount} · 数据 ${fmtSize(d.dataUsedMB * 1024 * 1024)} · 磁盘可用 ${d.diskAvailGB.toFixed(1)} GB`;
-  const me = $('#me-badge');
-  if (me) me.textContent = (ME.username || '?') + ' · ' + (ME.role || '?');
+  const chip = $('#user-chip');
+  if (chip) {
+    const roleLabel = { admin: '管理员', operator: '运维', viewer: '访客' }[ME.role] || ME.role;
+    chip.innerHTML = `<span>${esc(ME.username || '?')}</span><span class="badge badge-info" style="font-size:11px;padding:1px 8px">${esc(roleLabel)}</span>`;
+    chip.classList.remove('hidden');
+  }
   const badge = $('#docker-badge');
   badge.textContent = d.dockerOk ? 'Docker 正常' : 'Docker 不可用';
   badge.className = 'badge' + (d.dockerOk ? '' : ' bad');
@@ -138,7 +207,7 @@ function switchView(view) {
   currentView = view;
   if (consoleTimer) { clearInterval(consoleTimer); consoleTimer = null; }
   $$('.nav-item').forEach(a => a.classList.toggle('active', a.dataset.view === view));
-  $('#main').innerHTML = '<div class="empty-tip">加载中…</div>';
+  $('#main').innerHTML = skeletonRows(5);
   if (view === 'overview') renderOverview();
   if (view === 'instances') renderInstances();
   if (view === 'tasks') renderTasks();
@@ -191,7 +260,7 @@ const OP_TEXT = { stopping: '停止中…', restarting: '重启中…', 'backing
 
 function renderInstCards(list, box) {
   if (list.length === 0) {
-    box.innerHTML = '<div class="empty-tip">还没有实例，点击右上角「创建实例」开始</div>';
+    box.innerHTML = emptyState('🎮', '还没有实例', '选择一款游戏，几分钟即可开服', '<button class="btn primary" onclick="showCreateDialog()">＋ 创建第一个实例</button>');
     return;
   }
   box.innerHTML = list.map(i => {
@@ -214,7 +283,7 @@ function renderInstCards(list, box) {
         <span>端口 ${esc(i.ports.map(p => p.split(':')[0]).join('/'))}${i.useMesh ? '（虚拟网直连，详见联机组网页）' : ''}</span>
         <span>${fmtSize(i.memoryMB * 1024 * 1024)} 内存</span>
         ${i.node && i.node !== 'local' ? `<span class="badge">🖥 ${esc(i.node)}</span>` : ''}
-        ${i.useMesh ? `<span class="badge" style="background:#ede9fe;color:#5b21b6">🌐 组网</span>` : ''}
+        ${i.useMesh ? `<span class="badge" style="background:var(--violet-soft);color:var(--violet)">🌐 组网</span>` : ''}
       </div>
       <div>
         <div class="muted" style="font-size:12px">CPU ${esc(i.cpuPercent) || '-'} · 内存 ${esc(i.memUsage) || '-'}</div>
@@ -1366,15 +1435,15 @@ async function drawMetrics() {
   const line = (key, max) => pts.map((p, i) => `${i ? 'L' : 'M'}${X(i).toFixed(1)},${Y(p[key], max).toFixed(1)}`).join(' ');
   const labels = pts.filter((_, i) => i % Math.ceil(pts.length / 8) === 0);
   box.innerHTML = `
-    <svg viewBox="0 0 ${W} ${H}" style="width:100%;background:#fafbfd;border:1px solid var(--line);border-radius:8px">
+    <svg viewBox="0 0 ${W} ${H}" style="width:100%;background:var(--card);border:1px solid var(--line);border-radius:8px">
       ${[0, .25, .5, .75, 1].map(f => `<line x1="${PAD}" x2="${W - PAD}" y1="${Y(f * maxCpu, maxCpu)}" y2="${Y(f * maxCpu, maxCpu)}" stroke="#eceff4"/>`).join('')}
       <path d="${line('cpu', maxCpu)}" fill="none" stroke="#2563eb" stroke-width="2"/>
       <path d="${line('memMB', maxMem)}" fill="none" stroke="#16a34a" stroke-width="2"/>
       ${labels.map(p => `<text x="${X(pts.indexOf(p))}" y="${H - 10}" font-size="10" fill="#9aa4b2" text-anchor="middle">${p.t}</text>`).join('')}
     </svg>
     <div style="margin-top:10px;font-size:13px">
-      <span style="color:#2563eb">━ CPU（峰值 ${(Math.max(...pts.map(p => p.cpu))).toFixed(1)}%，当前 ${pts[pts.length - 1].cpu.toFixed(1)}%）</span>
-      &nbsp;&nbsp;<span style="color:#16a34a">━ 内存（峰值 ${fmtSize(Math.max(...pts.map(p => p.memMB)) * 1024 * 1024)}，当前 ${fmtSize(pts[pts.length - 1].memMB * 1024 * 1024)}）</span>
+      <span style="color:var(--primary)">━ CPU（峰值 ${(Math.max(...pts.map(p => p.cpu))).toFixed(1)}%，当前 ${pts[pts.length - 1].cpu.toFixed(1)}%）</span>
+      &nbsp;&nbsp;<span style="color:var(--green)">━ 内存（峰值 ${fmtSize(Math.max(...pts.map(p => p.memMB)) * 1024 * 1024)}，当前 ${fmtSize(pts[pts.length - 1].memMB * 1024 * 1024)}）</span>
     </div>`;
 }
 
@@ -1558,7 +1627,7 @@ async function doImport() {
 const ROLE_TEXT = { admin: '管理员', operator: '运维', viewer: '只读' };
 
 async function renderUsers() {
-  $('#main').innerHTML = '<div class="empty-tip">加载中…</div>';
+  $('#main').innerHTML = skeletonRows(5);
   const r = await api('/users');
   if (r.code !== 0) { $('#main').innerHTML = `<div class="card">${esc(r.msg)}</div>`; return; }
   const d = r.data;
@@ -1661,7 +1730,7 @@ let ET_TIMER = null;
 
 async function renderMesh() {
   if (ET_TIMER) { clearInterval(ET_TIMER); ET_TIMER = null; }
-  $('#main').innerHTML = '<div class="empty-tip">加载中…</div>';
+  $('#main').innerHTML = skeletonRows(5);
   drawMesh(await api('/easytier/status'));
   ET_TIMER = setInterval(async () => {
     if (currentView !== 'mesh') { clearInterval(ET_TIMER); ET_TIMER = null; return; }
@@ -1794,7 +1863,7 @@ function meshStatsHtml(d) {
     .slice(0, 20)
     .map(([ip, t]) => `
       <tr>
-        <td>${online.has(ip) ? '<span class="badge" style="background:#dcfce7;color:#166534">在线</span>' : '<span class="badge" style="background:#f1f5f9;color:#64748b">离线</span>'}</td>
+        <td>${online.has(ip) ? '<span class="badge badge-ok">在线</span>' : '<span class="badge badge-off">离线</span>'}</td>
         <td>${esc(t.hostname || '-')}</td>
         <td class="mono">${esc(ip)}</td>
         <td class="mono">↓${fmtKB(t.rxKB)} ↑${fmtKB(t.txKB)}</td>
@@ -1804,7 +1873,7 @@ function meshStatsHtml(d) {
   const evRows = events.slice(0, 15).map(e => `
     <div style="display:flex;gap:8px;align-items:baseline;padding:3px 0">
       <span class="mono muted" style="flex:0 0 110px;font-size:12px">${esc(e.time)}</span>
-      <span class="badge" style="flex:0 0 auto;background:${e.event === 'join' ? '#dcfce7;color:#166534' : '#f1f5f9;color:#64748b'}">${e.event === 'join' ? '上线' : '离线'}</span>
+      <span class="badge" style="flex:0 0 auto;background:${e.event === 'join' ? 'var(--green-soft);color:var(--green)' : 'var(--gray-soft);color:var(--muted)'}">${e.event === 'join' ? '上线' : '离线'}</span>
       <span>${esc(e.hostname || '-')}</span>
       <span class="mono muted">${esc(e.ipv4)}</span>
     </div>`).join('');

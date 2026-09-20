@@ -4,15 +4,23 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>游戏方舟 · 服务器面板</title>
-  <link rel="stylesheet" href="/s/css/style.css?v=3.1">
+  <link rel="stylesheet" href="/s/css/style.css?v=4.0">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⛵</text></svg>">
+  <script>
+    // 主题在 CSS 加载后、首帧渲染前恢复，避免闪白
+    (function () {
+      var t = localStorage.getItem('gp_theme') || 'auto';
+      var dark = t === 'dark' || (t === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
+      if (dark) document.documentElement.setAttribute('data-theme', 'dark');
+    })();
+  </script>
 </head>
 <body>
   <!-- 登录页 -->
   <div id="login-page" class="login-wrap hidden">
     <div class="login-card">
       <div class="login-logo">⛵ 游戏方舟</div>
-      <div class="login-sub">容器化游戏服务器管理面板 <span class="muted" style="font-size:11px">v2.5</span></div>
+      <div class="login-sub">容器化游戏服务器管理面板 <span class="muted" style="font-size:11px">v4.0</span></div>
       <input type="text" id="login-user" placeholder="用户名（默认 admin）" autocomplete="username">
       <input type="password" id="login-pass" placeholder="密码" autocomplete="current-password">
       <button id="login-btn" class="btn primary block">登 录</button>
@@ -27,6 +35,8 @@
       <div class="top-stats" id="top-stats"></div>
       <div class="top-right">
         <span id="docker-badge" class="badge"></span>
+        <span id="user-chip" class="user-chip hidden"></span>
+        <button class="icon-btn" id="theme-btn" title="切换主题（浅色/暗色/跟随系统）" onclick="cycleTheme()">🌙</button>
         <button class="btn ghost small" onclick="showCreateDialog()">＋ 创建实例</button>
         <button class="btn ghost small" onclick="logout()">退出</button>
       </div>
@@ -47,6 +57,6 @@
   <div id="modal-root"></div>
   <div id="toast-root"></div>
 
-  <script src="/s/js/app.js?v=3.1"></script>
+  <script src="/s/js/app.js?v=4.0"></script>
 </body>
 </html>
