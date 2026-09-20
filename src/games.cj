@@ -194,11 +194,27 @@ public class Games {
             "ServerPlugins",
             "世界自动生成并保存在数据目录；TShock 插件放入 ServerPlugins 后重启生效；默认世界名 gamepanel-world 可在环境变量里改",
             [
-                ConfigField("config.json", "json", "Settings.MaxSlots", "最大玩家槽位", "number", [], "8", ""),
-                ConfigField("config.json", "json", "Settings.ReservedSlots", "预留槽位（管理员）", "number", [], "20", ""),
-                ConfigField("config.json", "json", "Settings.ServerPassword", "进服密码", "text", [], "", "留空为无密码"),
-                ConfigField("config.json", "json", "Settings.AutoSave", "自动存档", "toggle", [], "true", ""),
-                ConfigField("config.json", "json", "Settings.BackupInterval", "自动备份间隔（分钟）", "number", [], "10", "")
+                // ---- 服务器信息 ----
+                ConfigField("config.json", "json", "Settings.ServerName", "服务器名称", "text", [], "", "客户端服务器列表显示", "服务器信息"),
+                ConfigField("config.json", "json", "Settings.ServerPassword", "进服密码", "text", [], "", "留空为无密码", "服务器信息"),
+                ConfigField("config.json", "json", "Settings.MaxSlots", "最大玩家槽位", "number", [], "8", "", "服务器信息"),
+                ConfigField("config.json", "json", "Settings.ReservedSlots", "预留槽位（管理员）", "number", [], "20", "", "服务器信息"),
+                ConfigField("config.json", "json", "Settings.Language", "服务器语言码", "number", [], "1", "1=英语 2=德语 3=意大利语 4=法语 5=西语 7=俄语 8=简中", "服务器信息"),
+                // ---- 游戏性 ----
+                ConfigField("config.json", "json", "Settings.AutoSave", "自动存档", "toggle", [], "true", "", "游戏性"),
+                ConfigField("config.json", "json", "Settings.BackupInterval", "自动备份间隔（分钟）", "number", [], "10", "0=关闭", "游戏性"),
+                ConfigField("config.json", "json", "Settings.BackupKeepFor", "备份保留时长（小时）", "number", [], "48", "", "游戏性"),
+                ConfigField("config.json", "json", "Settings.DisableHardcore", "关闭硬核模式", "toggle", [], "false", "开启后死亡不掉档重生", "游戏性"),
+                ConfigField("config.json", "json", "Settings.DisableDeflatePriority", "关闭传送优先级", "toggle", [], "false", "", "游戏性"),
+                ConfigField("config.json", "json", "Settings.ForcedDifficulty", "强制难度", "select",
+                    [("0", "跟随世界"), ("1", "经典"), ("2", "专家"), ("3", "大师"), ("4", "旅行")], "0", "覆盖加入玩家的难度请求", "游戏性"),
+                // ---- 安全与维护 ----
+                ConfigField("config.json", "json", "Settings.ProtectSpawn", "出生点保护半径", "number", [], "50", "0=关闭；防止家门口被拆", "安全与维护"),
+                ConfigField("config.json", "json", "Settings.RegionOnlyPvP", "仅 PVP 区域开战", "toggle", [], "false", "", "安全与维护"),
+                ConfigField("config.json", "json", "Settings.IgnoreChestPermissions", "忽略箱子权限", "toggle", [], "false", "开启=所有人可开箱子（信任服适用）", "安全与维护"),
+                ConfigField("config.json", "json", "Settings.AllowForbiddenItems", "允许违禁物品命令", "toggle", [], "false", "/give 等管理命令发放特殊物品", "安全与维护"),
+                ConfigField("config.json", "json", "Settings.LogRestores", "记录世界恢复", "toggle", [], "false", "排查回档纠纷用", "安全与维护"),
+                ConfigField("config.json", "json", "Settings.BufferPackets", "封包缓冲上限", "number", [], "512", "网络异常掉线时可调大", "安全与维护")
             ]
         ))
 

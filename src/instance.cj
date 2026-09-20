@@ -640,6 +640,91 @@ func applyDstWorldgen(ins: Instance, shard: String, presetKey: String): ?String 
     }
 }
 
+/* ---------------- 泰拉瑞亚世界文件 ---------------- */
+
+/* 数据目录 .wld 列表 + 当前启用（extraEnv WORLD_FILENAME 或默认 gamepanel-world.wld） */
+func terrariaWorldsJson(ins: Instance): JsonObject {
+    let worlds = JsonArray()
+    var current = ins.extraEnv.get("WORLD_FILENAME") ?? "gamepanel-world.wld"
+    try {
+        for (fi in Directory.readFrom(ins.dataDir)) {
+            if (fi.isDirectory() || !fi.name.endsWith(".wld")) {
+                continue
+            }
+            worlds.add(Jsons.obj([
+                ("name", JsonString(fi.name[..fi.name.size - 4])),
+                ("file", JsonString(fi.name)),
+                ("sizeMB", JsonInt(fi.size / 1048576)),
+                ("current", JsonBool(fi.name == current))
+            ]))
+        }
+    } catch (_: Exception) {
+        ()
+    }
+    return Jsons.obj([
+        ("worlds", worlds),
+        ("current", JsonString(current))
+    ])
+}
+
+public func registerTerrariaRoutes(): Unit {
+    router.get("/api/v1/instances/{id}/terraria-worlds", { ctx, md =>
+        if (!Auth.guard(ctx)) {
+            return
+        }
+        match (Instances.findOr404(ctx, md.matchString("id"))) {
+            case Some(ins) =>
+                if (ins.game != "terraria") {
+                    HttpUtil.fail(ctx, 4600, "仅泰拉瑞亚提供世界文件管理")
+                    return
+                }
+                HttpUtil.ok(ctx, terrariaWorldsJson(ins))
+            case None => ()
+        }
+    })
+
+    /* 切换当前世界：只改 WORLD_FILENAME/WORLD_NAME 两个环境变量并重建容器（其余 env 不动） */
+    router.post("/api/v1/instances/{id}/terraria-worlds/select", { ctx, md =>
+        if (!Auth.guard(ctx) || !Auth.allowAdmin(ctx)) {
+            return
+        }
+        match (Instances.findOr404(ctx, md.matchString("id"))) {
+            case Some(ins) =>
+                if (ins.game != "terraria") {
+                    HttpUtil.fail(ctx, 4600, "仅泰拉瑞亚提供世界文件管理")
+                    return
+                }
+                let body = HttpUtil.bodyJson(ctx)
+                let file = HttpUtil.str(body, "file", "").trimAscii()
+                if (file == "" || file.contains("/") || file.contains("\\") || file.contains("..") || !file.endsWith(".wld")) {
+                    HttpUtil.fail(ctx, 4601, "非法世界文件名")
+                    return
+                }
+                if (!exists(ins.dataDir + "/" + file)) {
+                    HttpUtil.fail(ctx, 4602, "世界文件不存在: ${file}")
+                    return
+                }
+                let worldName = file[..file.size - 4]
+                Store.update({ d =>
+                    let found = d.findInstance(ins.id)
+                    match (found) {
+                        case Some(cur) =>
+                            let _ = cur.extraEnv.add("WORLD_FILENAME", file)
+                            let _ = cur.extraEnv.add("WORLD_NAME", worldName)
+                        case None => ()
+                    }
+                })
+                rebuild(ins.id)
+                match (Auth.current(ctx)) {
+                    case Some(u) => Users.audit(u.username, "切换泰拉瑞亚世界 -> ${file} @ ${ins.name}")
+                    case None => ()
+                }
+                HttpUtil.okMsg(ctx, "已切换到 ${file}（容器已重建）")
+            case None => ()
+        }
+    })
+}
+
 public func registerDstRoutes(): Unit {
     router.get("/api/v1/instances/{id}/dst-shards", { ctx, md =>
         if (!Auth.guard(ctx)) {

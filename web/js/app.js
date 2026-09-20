@@ -1476,6 +1476,11 @@ async function renderSettings() {
       <h3>🔥 分片与世界预设</h3>
       <div id="dst-shards-body" class="empty-tip">加载中…</div>
     </div>` : ''}
+    ${i.game === 'terraria' ? `
+    <div class="card">
+      <h3>🌳 世界文件</h3>
+      <div id="tw-body" class="empty-tip">加载中…</div>
+    </div>` : ''}
     <div class="card">
       <h3>基本设置（保存后自动重建容器，数据不受影响）</h3>
       <div class="form-row"><label>实例名称</label><input class="inp" id="set-name" value="${esc(i.name)}"></div>
@@ -1506,6 +1511,33 @@ async function renderSettings() {
   loadGameCfg();
   if (i.game === 'minecraft') loadWorlds();
   if (i.game === 'dst') loadDstShards();
+  if (i.game === 'terraria') loadTerrariaWorlds();
+}
+
+/* ----- 泰拉瑞亚世界文件 ----- */
+async function loadTerrariaWorlds() {
+  const box = $('#tw-body');
+  if (!box) return;
+  const r = await api(`/instances/${CUR.id}/terraria-worlds`);
+  if (!box) return;
+  if (r.code !== 0) { box.textContent = r.msg; return; }
+  const d = r.data;
+  const rows = (d.worlds || []).map(w => `
+    <tr>
+      <td><b>${esc(w.name)}</b> <span class="muted mono" style="font-size:11px">${esc(w.file)}</span></td>
+      <td class="mono">${w.sizeMB} MB</td>
+      <td>${w.current ? '<span class="badge badge-ok">当前世界</span>' : (ME.role === 'admin' ? `<button class="btn small" onclick="terrariaSwitchWorld(${JSON.stringify(w.file).replace(/"/g, '&quot;')})">切换到此世界</button>` : '<span class="muted">—</span>')}</td>
+    </tr>`).join('');
+  box.innerHTML = (d.worlds || []).length
+    ? `<table class="tbl"><tr><th>世界</th><th>大小</th><th>操作</th></tr>${rows}</table>
+       <div class="muted" style="font-size:12px;margin-top:8px">切换 = 更新 WORLD_FILENAME 并重建容器（数据不动）；上传 .wld 到数据目录即可出现在列表。</div>`
+    : emptyState('🌳', '尚未生成世界', '启动实例后自动生成，或上传现成的 .wld 文件');
+}
+
+async function terrariaSwitchWorld(file) {
+  const r = await api(`/instances/${CUR.id}/terraria-worlds/select`, { method: 'POST', body: { file } });
+  toast(r.msg, r.code === 0 ? 'ok' : 'err');
+  if (r.code === 0) setTimeout(loadTerrariaWorlds, 1500);
 }
 
 /* ----- 饥荒 DST 分片与世界预设 ----- */
