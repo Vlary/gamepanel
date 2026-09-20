@@ -324,3 +324,27 @@ func testRoleLevel(): Unit {
     @Assert(roleLevel("operator") > roleLevel("viewer"))
     @Assert(roleLevel("unknown") == 0)
 }
+
+@Test
+func testParseTraffic(): Unit {
+    // easytier-cli peer 表 rx/tx 列的单位解析（统一换算为 KB）
+    @Assert(EasyTier.parseTraffic("0 B") == 0.0)
+    let kb = EasyTier.parseTraffic("4.87 kB")
+    @Assert(kb > 4.86 && kb < 4.88)
+    @Assert(EasyTier.parseTraffic("1.00 MB") == 1024.0)
+    @Assert(EasyTier.parseTraffic("2.00 GB") == 2.0 * 1024.0 * 1024.0)
+    // 512 B -> 0.5 KB
+    let b = EasyTier.parseTraffic("512 B")
+    @Assert(b > 0.499 && b < 0.501)
+    // 无数据标记
+    @Assert(EasyTier.parseTraffic("-") == -1.0)
+    @Assert(EasyTier.parseTraffic("") == -1.0)
+    @Assert(EasyTier.parseTraffic("abc") == -1.0)
+}
+
+@Test
+func testStripMask(): Unit {
+    @Assert(EasyTier.stripMask("10.6.6.2/24") == "10.6.6.2")
+    @Assert(EasyTier.stripMask("10.6.6.2") == "10.6.6.2")
+    @Assert(EasyTier.stripMask("") == "")
+}

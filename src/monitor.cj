@@ -77,6 +77,7 @@ public class Monitor {
 
     public static func start() {
         loadHistory()
+        EasyTier.loadStats()
         spawn {
             loop()
         }
@@ -168,6 +169,8 @@ public class Monitor {
                     mutex.unlock()
                 }
             }
+            // 组网 peer 采样：上下线事件 + 流量累计（内部自判启用状态，未启用时零开销）
+            EasyTier.sampleOnce()
         }
     }
 
@@ -202,6 +205,18 @@ public class Monitor {
     }
 
     static func notify(ins: Instance, st: String): Unit {
+        sendWebhook(Jsons.obj([
+            ("event", JsonString("instance_exit")),
+            ("instance", JsonString(ins.name)),
+            ("id", JsonString(ins.id)),
+            ("game", JsonString(ins.game)),
+            ("status", JsonString(st)),
+            ("time", JsonString(Instances.nowStr()))
+        ]))
+    }
+
+    /* 通用 Webhook：GP_NOTIFY_URL POST JSON（实例异常退出 / 组网玩家上下线共用） */
+    public static func sendWebhook(payload: JsonObject): Unit {
         if (notifyUrl == "") {
             return
         }
@@ -221,18 +236,10 @@ public class Monitor {
                 var cfg = TlsClientConfig()
                 cfg.serverName = Some(host)
                 let client = ClientBuilder().readTimeout(10 * Duration.second).tlsConfig(cfg).build()
-                let body = Jsons.obj([
-                    ("event", JsonString("instance_exit")),
-                    ("instance", JsonString(ins.name)),
-                    ("id", JsonString(ins.id)),
-                    ("game", JsonString(ins.game)),
-                    ("status", JsonString(st)),
-                    ("time", JsonString(Instances.nowStr()))
-                ]).toJsonString()
                 let req = HttpRequestBuilder().url(notifyUrl).post()
                     .header("content-type", "application/json")
                     .header("accept-encoding", "identity")
-                    .body(body).build()
+                    .body(payload.toJsonString()).build()
                 let resp = client.send(req)
                 println("[monitor] Webhook 已发送: ${Int64(resp.status)}")
                 client.close()

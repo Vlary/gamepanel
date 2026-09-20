@@ -1669,20 +1669,36 @@ async function renderMesh() {
   }, 5000);
 }
 
+/* KB 数 -> 人类可读（B/KB/MB/GB） */
+function fmtKB(kb) {
+  kb = Number(kb) || 0;
+  if (kb === 0) return '0';
+  if (kb < 1) return (kb * 1024).toFixed(0) + ' B';
+  if (kb < 1024) return kb.toFixed(1) + ' KB';
+  if (kb < 1024 * 1024) return (kb / 1024).toFixed(2) + ' MB';
+  return (kb / 1024 / 1024).toFixed(2) + ' GB';
+}
+
 async function drawMesh(r, silent) {
   if (r.code !== 0) { $('#main').innerHTML = `<div class="card">${esc(r.msg)}</div>`; return; }
   const d = r.data;
   const cfg = d.config || {};
   const isAdmin = ME.role === 'admin';
-  const peerRows = (d.peers || []).map(p => `
+  const traffic = d.traffic || {};
+  const peerTraffic = p => traffic[(p.ipv4 || '').split('/')[0]] || {};
+  const peerRows = (d.peers || []).map(p => {
+    const t = peerTraffic(p);
+    return `
     <tr>
       <td>${esc(p.hostname || p.node_id || '-')}</td>
       <td class="mono">${esc(p.ipv4 || '-')}</td>
       <td>${esc(p.latency_ms != null ? p.latency_ms + 'ms' : '-')}</td>
       <td>${esc(p.loss_rate != null ? (p.loss_rate * 100).toFixed(1) + '%' : '-')}</td>
+      <td class="mono" title="面板口径累计（对端重连自动续算）">↓${fmtKB(t.rxKB)} ↑${fmtKB(t.txKB)}</td>
       <td>${esc(p.tunnel_proto || '-')}</td>
       <td>${esc(p.nat_type || '-')}</td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
   const routeRows = (d.routes || []).map(rt => `
     <tr>
       <td class="mono">${esc(rt.ipv4 || '-')}</td>
@@ -1711,6 +1727,11 @@ async function drawMesh(r, silent) {
             <option value="off" ${cfg.wgEnabled ? '' : 'selected'}>关闭</option>
             <option value="on" ${cfg.wgEnabled ? 'selected' : ''}>开启(玩家免装ET)</option>
           </select></div>
+        <div class="form-row" style="margin:0;flex:0 0 auto"><label>玩家上下线通知</label>
+          <label style="display:flex;align-items:center;gap:6px;font-weight:400;padding:8px 0">
+            <input type="checkbox" id="et-notify" ${cfg.peerNotify ? 'checked' : ''} style="width:auto">
+            <span class="muted">Webhook推送</span>
+          </label></div>
         <button class="btn primary" onclick="etApply()">${d.enabled ? '保存并重启' : '启用组网'}</button>
         ${d.enabled ? '<button class="btn danger" onclick="etStop()">停止</button>' : ''}
       </div>` : '<div class="muted">仅管理员可配置</div>'}
@@ -1718,8 +1739,9 @@ async function drawMesh(r, silent) {
     ${d.enabled ? `
     <div class="card">
       <h3>📡 在线节点（${(d.peers || []).length}）</h3>
-      ${(d.peers || []).length ? `<table class="tbl"><tr><th>主机名</th><th>虚拟IP</th><th>延迟</th><th>丢包</th><th>隧道</th><th>NAT类型</th></tr>${peerRows}</table>` : '<div class="empty-tip">暂无其他节点（玩家加入后会出现在这里）</div>'}
+      ${(d.peers || []).length ? `<table class="tbl"><tr><th>主机名</th><th>虚拟IP</th><th>延迟</th><th>丢包</th><th>累计流量</th><th>隧道</th><th>NAT类型</th></tr>${peerRows}</table>` : '<div class="empty-tip">暂无其他节点（玩家加入后会出现在这里）</div>'}
       ${(d.routes || []).length ? `<h3 class="mt">路由表</h3><table class="tbl"><tr><th>虚拟IP</th><th>主机名</th><th>下一跳</th><th>路径延迟</th></tr>${routeRows}</table>` : ''}
+      ${meshStatsHtml(d)}
     </div>` : ''}
     <div id="et-invite"></div>`;
   if (isAdmin && d.enabled && d.running) { loadInvite(); loadWgConfig(); }
@@ -1762,6 +1784,37 @@ async function loadWgConfig() {
   $('#et-wg-conf').textContent = r.data.config;
 }
 
+/* 连接动态时间线 + 节点流量统计（数据来自后端 30 秒采样） */
+function meshStatsHtml(d) {
+  const events = d.events || [];
+  const traffic = d.traffic || {};
+  const online = new Set((d.peers || []).map(p => (p.ipv4 || '').split('/')[0]));
+  const statRows = Object.entries(traffic)
+    .sort((a, b) => (Number(b[1].rxKB) || 0) + (Number(b[1].txKB) || 0) - (Number(a[1].rxKB) || 0) - (Number(a[1].txKB) || 0))
+    .slice(0, 20)
+    .map(([ip, t]) => `
+      <tr>
+        <td>${online.has(ip) ? '<span class="badge" style="background:#dcfce7;color:#166534">在线</span>' : '<span class="badge" style="background:#f1f5f9;color:#64748b">离线</span>'}</td>
+        <td>${esc(t.hostname || '-')}</td>
+        <td class="mono">${esc(ip)}</td>
+        <td class="mono">↓${fmtKB(t.rxKB)} ↑${fmtKB(t.txKB)}</td>
+        <td>${t.joins != null ? t.joins : '-'}</td>
+        <td class="mono">${esc(t.firstSeen || '-')}</td>
+      </tr>`).join('');
+  const evRows = events.slice(0, 15).map(e => `
+    <div style="display:flex;gap:8px;align-items:baseline;padding:3px 0">
+      <span class="mono muted" style="flex:0 0 110px;font-size:12px">${esc(e.time)}</span>
+      <span class="badge" style="flex:0 0 auto;background:${e.event === 'join' ? '#dcfce7;color:#166534' : '#f1f5f9;color:#64748b'}">${e.event === 'join' ? '上线' : '离线'}</span>
+      <span>${esc(e.hostname || '-')}</span>
+      <span class="mono muted">${esc(e.ipv4)}</span>
+    </div>`).join('');
+  return `
+    ${statRows ? `<h3 class="mt">📊 节点流量统计</h3>
+    <table class="tbl"><tr><th>状态</th><th>主机名</th><th>虚拟IP</th><th>累计流量</th><th>接入次数</th><th>首次发现</th></tr>${statRows}</table>
+    <div class="kv-note">每 30 秒采样对端累计计数器折算，对端重启/重连计数器回退时自动续算，面板重启不丢（et-stats.json）。</div>` : ''}
+    ${evRows ? `<h3 class="mt">🛰 连接动态（玩家上下线）</h3>${evRows}` : ''}`;
+}
+
 async function etApply() {
   const peers = $('#et-peers').value.split(/[,，]/).map(s => s.trim()).filter(Boolean);
   let secret = $('#et-secret').value.trim();
@@ -1775,7 +1828,8 @@ async function etApply() {
     secret: secret,
     peers: peers,
     rpcPort: $('#et-rpc').value.trim() || '15890',
-    wgEnabled: $('#et-wg').value === 'on'
+    wgEnabled: $('#et-wg').value === 'on',
+    peerNotify: $('#et-notify').checked
   };
   if (!body.networkName) { toast('请填写网络名', 'err'); return; }
   const r = await api('/easytier/config', { method: 'PUT', body });

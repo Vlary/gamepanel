@@ -79,6 +79,18 @@ Base URL: `http://<host>:8080/api/v1`
 
 cron 为五段表达式「分 时 日 月 周」，支持 `*`、`*/n`、`a-b`、`a,b,c`；日与周同时受限时按"同时满足"处理。
 
+## 联机组网（EasyTier）
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/easytier/status` | 组网状态：config（密钥打码）/peers/routes/**events（上下线事件，倒序）**/**traffic（每节点累计流量）** |
+| PUT | `/easytier/config` | 配置并启动（admin）。body：`mode(host\|join)/networkName/secret/peers[]/rpcPort/wgEnabled/peerNotify` |
+| POST | `/easytier/stop` | 停止组网（admin） |
+| GET | `/easytier/invite` | 玩家邀请卡：网络名/密钥/地址/一键命令（admin） |
+| GET | `/easytier/wg-config` | WireGuard 客户端配置文本（admin，需开启 wgEnabled） |
+
+后台每 30 秒采样 peer 表：节点上下线产生 `events` 记录（环形 200 条，`et-stats.json` 持久化），rx/tx 计数器增量累计入 `traffic`（对端重连计数器回退自动续算）。`peerNotify: true` 时上下线经 `GP_NOTIFY_URL` 推送 `peer_join`/`peer_leave`。
+
 ## 错误码段
 
 | 段 | 含义 |

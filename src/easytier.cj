@@ -12,6 +12,8 @@ package gamepanel
 
 import stdx.net.http.*
 import stdx.encoding.json.*
+import std.sync.*
+import std.time.*
 import std.fs.*
 import std.collection.*
 import std.convert.*
@@ -19,6 +21,9 @@ import std.process.*
 
 let ET_CONTAINER = "gp-easytier"
 let ET_IMAGE = "easytier/easytier:latest"
+
+/* peer 表字段顺序（easytier-cli 输出列） */
+let ET_PEER_FIELDS = ["ipv4", "hostname", "cost", "latency_ms", "loss", "rx", "tx", "tunnel_proto", "nat_type", "version"]
 
 public class EasyTier {
     /* ---------------- 配置 ---------------- */
@@ -175,7 +180,7 @@ public class EasyTier {
         if (enabled && containerUp) {
             let pj = cliOutput("peer")
             if (pj != "") {
-                peers = parseTable(pj, ["ipv4", "hostname", "cost", "latency_ms", "loss", "rx", "tx", "tunnel_proto", "nat_type", "version"])
+                peers = parseTable(pj, ET_PEER_FIELDS)
             }
             let rj = cliOutput("route")
             if (rj != "") {
@@ -191,6 +196,8 @@ public class EasyTier {
             ("config", maskSecret(o)),
             ("peers", peers),
             ("routes", routes),
+            ("events", eventsJson()),
+            ("traffic", trafficJson()),
             ("error", JsonString(error))
         ])
     }
@@ -302,6 +309,327 @@ public class EasyTier {
             ("addrs", arr),
             ("joinCommand", JsonString(cmd))
         ])
+    }
+
+    /* ---------------- 玩家上下线审计 + 流量统计 ---------------- */
+
+    /*
+     * 每 30 秒由 Monitor.loop 采样一次 peer 表：
+     *   - peer 集合 diff -> 上线/下线事件（独立历史，不混入管理员审计避免刷屏）
+     *   - rx/tx 累计计数器的增量 -> 每 peer 累计流量（对端重连计数器回退时按 0 处理）
+     * 面板启动/组网恢复后的首轮只建立基线不报事件，防止事件风暴。
+     * 持久化：data/et-stats.json
+     */
+    private static let etMutex = Mutex()
+    private static var peerSeen = HashSet<String>()              // 上一轮在线的 peer ipv4
+    private static var baselineReady = false
+    private static let peerStat = HashMap<String, JsonObject>()  // ipv4 -> 主机名/累计流量/次数
+    private static let lastRx = HashMap<String, Float64>()       // 对端上报的累计计数器上次值
+    private static let lastTx = HashMap<String, Float64>()
+    private static let etEvents = ArrayList<JsonObject>()
+    private static let MAX_EVENTS = 200
+
+    static func statsFile(): String {
+        return Config.dataRoot + "/et-stats.json"
+    }
+
+    static func loadStats(): Unit {
+        if (!exists(statsFile())) {
+            return
+        }
+        try {
+            let v = JsonValue.fromStr(String.fromUtf8(File.readFrom(statsFile())))
+            if (!HttpUtil.kindIs(v, JsonKind.JsObject)) {
+                return
+            }
+            let o = v.asObject()
+            etMutex.lock()
+            match (o.get("peers")) {
+                case Some(ps) =>
+                    if (HttpUtil.kindIs(ps, JsonKind.JsObject)) {
+                        for ((ip, pv) in ps.asObject().getFields()) {
+                            if (HttpUtil.kindIs(pv, JsonKind.JsObject)) {
+                                peerStat.add(ip, pv.asObject())
+                            }
+                        }
+                    }
+                case None => ()
+            }
+            match (o.get("events")) {
+                case Some(ev) =>
+                    if (HttpUtil.kindIs(ev, JsonKind.JsArray)) {
+                        for (e in ev.asArray().getItems()) {
+                            if (HttpUtil.kindIs(e, JsonKind.JsObject)) {
+                                etEvents.add(e.asObject())
+                            }
+                        }
+                    }
+                case None => ()
+            }
+            etMutex.unlock()
+            println("[easytier] 已加载组网统计：${peerStat.size} 个节点 ${etEvents.size} 条事件")
+        } catch (_: Exception) {
+            ()
+        }
+    }
+
+    static func saveStats(): Unit {
+        let root = JsonObject()
+        etMutex.lock()
+        let peersObj = JsonObject()
+        for ((ip, pv) in peerStat) {
+            peersObj.put(ip, pv)
+        }
+        let evArr = JsonArray()
+        for (e in etEvents) {
+            evArr.add(e)
+        }
+        etMutex.unlock()
+        root.put("peers", peersObj)
+        root.put("events", evArr)
+        try {
+            let tmp = statsFile() + ".tmp"
+            File.writeTo(tmp, root.toJsonString().toArray())
+            rename(tmp, to: statsFile(), overwrite: true)
+        } catch (_: Exception) {
+            ()
+        }
+    }
+
+    /* "4.87 kB" / "0 B" / "1.20 MB" -> KB；无数据（"-" 或空）返回 -1 */
+    public static func parseTraffic(s: String): Float64 {
+        let t = s.trimAscii()
+        if (t == "" || t == "-") {
+            return -1.0
+        }
+        var num = t
+        var scale = 1.0
+        let lower = t.toAsciiLower()
+        if (lower.endsWith("gb")) {
+            num = t[..t.size - 2]
+            scale = 1024.0 * 1024.0
+        } else if (lower.endsWith("mb")) {
+            num = t[..t.size - 2]
+            scale = 1024.0
+        } else if (lower.endsWith("kb")) {
+            num = t[..t.size - 2]
+        } else if (lower.endsWith("b")) {
+            num = t[..t.size - 1]
+            scale = 1.0 / 1024.0
+        }
+        try {
+            return Float64.parse(num.trimAscii()) * scale
+        } catch (_: Exception) {
+            return -1.0
+        }
+    }
+
+    static func evtTime(): String {
+        return DateTime.now().format("MM-dd HH:mm:ss")
+    }
+
+    static func addEvent(kind: String, ip: String, host: String): Unit {
+        etEvents.add(Jsons.obj([
+            ("time", JsonString(evtTime())),
+            ("event", JsonString(kind)),
+            ("ipv4", JsonString(ip)),
+            ("hostname", JsonString(host))
+        ]))
+        if (etEvents.size > MAX_EVENTS) {
+            // 环形上限：删最旧（重建列表避免逐个头部删除）
+            let kept = ArrayList<JsonObject>()
+            for (i in 1..etEvents.size) {
+                kept.add(etEvents[i])
+            }
+            etEvents.clear()
+            for (e in kept) {
+                etEvents.add(e)
+            }
+        }
+    }
+
+    /* ipv4 "10.6.6.2/24" -> "10.6.6.2" */
+    static func stripMask(ip: String): String {
+        let sp = idxOf(ip, "/")
+        if (sp > 0) {
+            return ip[..sp]
+        }
+        return ip
+    }
+
+    static func f2(v: Float64): JsonFloat {
+        let j = JsonFloat(v)
+        return j
+    }
+
+    public static func sampleOnce(): Unit {
+        let o = loadConfig()
+        let enabled = HttpUtil.boolean(o, "enabled", false)
+        let up = Docker.status(ET_CONTAINER) == "running"
+        if (!enabled || !up) {
+            etMutex.lock()
+            if (!peerSeen.isEmpty()) {
+                peerSeen.clear()
+            }
+            baselineReady = false
+            etMutex.unlock()
+            return
+        }
+        let pj = cliOutput("peer")
+        if (pj == "") {
+            return   // RPC 未就绪，跳过本轮
+        }
+        let rows = parseTable(pj, ET_PEER_FIELDS)
+        // 本轮在线集合（排除本地节点：cost=Local）
+        let cur = HashSet<String>()
+        let curInfo = HashMap<String, (String, Float64, Float64)>()   // ip -> (hostname, rxKB, txKB)
+        for (rowV in rows.getItems()) {
+            if (!HttpUtil.kindIs(rowV, JsonKind.JsObject)) {
+                continue
+            }
+            let row = rowV.asObject()
+            if (Jsons.text(row.get("cost") ?? JsonString("")) == "Local") {
+                continue
+            }
+            let ip = stripMask(Jsons.text(row.get("ipv4") ?? JsonString("")))
+            let host = Jsons.text(row.get("hostname") ?? JsonString(""))
+            if (ip == "") {
+                continue
+            }
+            cur.add(ip)
+            curInfo.add(ip, (host, parseTraffic(Jsons.text(row.get("rx") ?? JsonString(""))),
+                parseTraffic(Jsons.text(row.get("tx") ?? JsonString("")))))
+        }
+        var notifyEvents = ArrayList<JsonObject>()
+        etMutex.lock()
+        if (!baselineReady) {
+            baselineReady = true
+            for (ip in cur) {
+                peerSeen.add(ip)
+            }
+            // 基线轮也记下计数器，避免首轮流量虚增
+            for ((ip, info) in curInfo) {
+                lastRx.add(ip, info[1])
+                lastTx.add(ip, info[2])
+            }
+            etMutex.unlock()
+            return
+        }
+        // 上线事件
+        for (ip in cur) {
+            if (!peerSeen.contains(ip)) {
+                let host = curInfo.get(ip) ?? ("", -1.0, -1.0)
+                addEvent("join", ip, host[0])
+                notifyEvents.add(Jsons.obj([
+                    ("event", JsonString("peer_join")),
+                    ("ipv4", JsonString(ip)),
+                    ("hostname", JsonString(host[0])),
+                    ("time", JsonString(evtTime()))
+                ]))
+            }
+        }
+        // 下线事件
+        for (ip in peerSeen) {
+            if (!cur.contains(ip)) {
+                let host = match (peerStat.get(ip)) {
+                    case Some(pv) => Jsons.text(pv.get("hostname") ?? JsonString(""))
+                    case None => ""
+                }
+                addEvent("leave", ip, host)
+                notifyEvents.add(Jsons.obj([
+                    ("event", JsonString("peer_leave")),
+                    ("ipv4", JsonString(ip)),
+                    ("hostname", JsonString(host)),
+                    ("time", JsonString(evtTime()))
+                ]))
+            }
+        }
+        peerSeen.clear()
+        for (ip in cur) {
+            peerSeen.add(ip)
+        }
+        // 流量累计（计数器回退按 0 增量处理，仅刷新基线）
+        for ((ip, info) in curInfo) {
+            let host = info[0]
+            let rxNow = info[1]
+            let txNow = info[2]
+            let pv = match (peerStat.get(ip)) {
+                case Some(v) => v
+                case None => Jsons.obj([
+                    ("hostname", JsonString(host)),
+                    ("rxKB", f2(0.0)),
+                    ("txKB", f2(0.0)),
+                    ("joins", JsonInt(0)),
+                    ("firstSeen", JsonString(evtTime()))
+                ])
+            }
+            if (rxNow >= 0.0) {
+                let base = lastRx.get(ip) ?? 0.0
+                var rxTot = Float64.parse(Jsons.text(pv.get("rxKB") ?? JsonString("0")))
+                if (rxNow > base) {
+                    rxTot += (rxNow - base)
+                }
+                pv.put("rxKB", f2(rxTot))
+                lastRx.add(ip, rxNow)
+            }
+            if (txNow >= 0.0) {
+                let base = lastTx.get(ip) ?? 0.0
+                var txTot = Float64.parse(Jsons.text(pv.get("txKB") ?? JsonString("0")))
+                if (txNow > base) {
+                    txTot += (txNow - base)
+                }
+                pv.put("txKB", f2(txTot))
+                lastTx.add(ip, txNow)
+            }
+            // 本轮上线的节点接入次数 +1
+            var joinedNow = false
+            for (e in notifyEvents) {
+                if (Jsons.text(e.get("event") ?? JsonString("")) == "peer_join" &&
+                    Jsons.text(e.get("ipv4") ?? JsonString("")) == ip) {
+                    joinedNow = true
+                    break
+                }
+            }
+            if (joinedNow) {
+                pv.put("joins", JsonInt(Int64.parse(Jsons.text(pv.get("joins") ?? JsonString("0"))) + 1))
+            }
+            pv.put("hostname", JsonString(host))
+            pv.put("lastSeen", JsonString(evtTime()))
+            peerStat.add(ip, pv)
+        }
+        etMutex.unlock()
+        if (!notifyEvents.isEmpty()) {
+            println("[easytier] 节点变动 ${notifyEvents.size} 条")
+            if (HttpUtil.boolean(o, "peerNotify", false)) {
+                for (e in notifyEvents) {
+                    Monitor.sendWebhook(e)
+                }
+            }
+        }
+        saveStats()
+    }
+
+    public static func eventsJson(): JsonArray {
+        let arr = JsonArray()
+        etMutex.lock()
+        // 倒序：最新在前
+        var i = etEvents.size - 1
+        while (i >= 0) {
+            arr.add(etEvents[i])
+            i -= 1
+        }
+        etMutex.unlock()
+        return arr
+    }
+
+    public static func trafficJson(): JsonObject {
+        let out = JsonObject()
+        etMutex.lock()
+        for ((ip, pv) in peerStat) {
+            out.put(ip, pv)
+        }
+        etMutex.unlock()
+        return out
     }
 }
 

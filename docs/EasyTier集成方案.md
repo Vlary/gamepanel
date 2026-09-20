@@ -92,13 +92,13 @@
 ### P1：体验完善
 5. 形态 B 挂接模式（检测系统 easytier 进程/11010 占用时提示）
 6. 形态 C 无 TUN 模式（docker run 检测 /dev/net/tun 不可用时自动降级 --no-tun + port-forward）
-7. WireGuard Portal 集成（勾选即开 11013，生成 WG 客户端配置/二维码）
-8. 玩家上下线审计（peer 增减 → 面板审计日志 + 可选 Webhook 复用现有告警）
+7. WireGuard Portal 集成（勾选即开 11013，生成 WG 客户端配置/二维码）✅ 已落地
+8. 玩家上下线审计（peer 增减 → 面板审计日志 + 可选 Webhook 复用现有告警）✅ 已落地（连接动态时间线 + et-stats.json 持久化 + peerNotify 开关推送 peer_join/peer_leave；独立事件历史不混入管理员审计，避免玩家动态刷屏）
 
 ### P2：进阶
 9. 多节点联动：每个 docker context 节点各跑一个 EasyTier 实例，同网络名组成跨机房 mesh（多节点面板的直接延伸）
 10. 按实例隔离的多网络：每游戏服独立网络名（不同朋友圈互不可见）
-11. 流量统计报表（peer 表的 rx/tx 采样入监控历史）
+11. 流量统计报表（peer 表的 rx/tx 采样入监控历史）✅ 已落地（每 30 秒采样，计数器增量累计，对端重连回退自动续算，组网页面节点流量统计表）
 
 ---
 
