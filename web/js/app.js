@@ -1510,9 +1510,21 @@ async function loadGameCfg() {
   if (!d.fields || d.fields.length === 0) { box.textContent = '该游戏暂无专属配置'; return; }
   const warn = d.fileMissing
     ? `<div class="kv-note">配置文件尚未生成（首次启动实例后创建），当前显示默认值，保存后将在下次启动时生效。</div>` : '';
+  // 按分组聚合渲染（同组字段一个分区；无 group 字段时归入"通用"）
+  const groups = [];
+  const groupIdx = {};
+  d.fields.forEach(f => {
+    const g = f.group || '通用';
+    if (!(g in groupIdx)) { groupIdx[g] = groups.length; groups.push({ name: g, fields: [] }); }
+    groups[groupIdx[g]].fields.push(f);
+  });
   box.innerHTML = `${warn}
-    <div class="grid cols-2" style="gap:12px">
-      ${d.fields.map((f, i) => `
+    ${groups.map(g => `
+      <h3 style="font-size:13px;color:var(--muted);margin:16px 0 10px">${esc(g.name)}（${g.fields.length}）</h3>
+      <div class="grid cols-2" style="gap:12px">
+        ${g.fields.map(f => {
+          const i = d.fields.indexOf(f);
+          return `
         <div class="form-row" style="margin:0">
           <label>${esc(f.label)} <span class="muted mono" style="font-weight:400">(${esc(f.path)})</span></label>
           ${f.kind === 'toggle'
@@ -1521,8 +1533,9 @@ async function loadGameCfg() {
               ? `<select class="inp" data-gc="${i}">${f.options.map(o => `<option value="${esc(o.value)}" ${o.value === f.value ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}</select>`
               : `<input class="inp" data-gc="${i}" type="${f.kind === 'number' ? 'number' : 'text'}" value="${esc(f.value)}">`}
           ${f.help ? `<div class="muted" style="font-size:12px;margin-top:4px">${esc(f.help)}</div>` : ''}
-        </div>`).join('')}
-    </div>
+        </div>`;
+        }).join('')}
+      </div>`).join('')}
     <div class="mt" style="display:flex;gap:10px;align-items:center">
       <button class="btn primary" id="gamecfg-save">保存配置</button>
       <span class="muted" style="font-size:12px">保存后需重启实例生效</span>

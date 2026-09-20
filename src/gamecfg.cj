@@ -328,7 +328,8 @@ public func registerGameCfgRoutes(): Unit {
                                 ("value", JsonString(v)),
                                 ("default", JsonString(f.def)),
                                 ("options", opts),
-                                ("help", JsonString(f.help))
+                                ("help", JsonString(f.help)),
+                                ("group", JsonString(f.group))
                             ]))
                         }
                         HttpUtil.ok(ctx, Jsons.obj([("fields", arr), ("fileMissing", JsonBool(fileMissing))]))

@@ -15,8 +15,10 @@ public class GameVersion {
 
 /* 游戏配置项：指向数据目录内某个配置文件的一个键。
    format: properties | ini | json
-   path:   properties 为键名；ini 为 "段名.键名"；json 为点路径 */
+   path:   properties 为键名；ini 为 "段名.键名"；json 为点路径
+   group:  前端分组标题（同组字段聚合渲染，默认"通用"） */
 public class ConfigField {
+    public var group = "通用"
     public ConfigField(
         let file: String,
         let format: String,
@@ -27,6 +29,13 @@ public class ConfigField {
         let def: String,
         let help: String
     ) {}
+
+    /* 带分组的便捷构造 */
+    public init(file: String, format: String, path: String, label: String,
+        kind: String, options: Array<(String, String)>, def: String, help: String, group: String) {
+        this(file, format, path, label, kind, options, def, help)
+        this.group = group
+    }
 }
 
 public class GameTemplate {
@@ -100,16 +109,34 @@ public class Games {
             "mods",
             "创建即代表接受 Minecraft EULA；首次启动需下载核心文件，耐心等待日志出现 Done",
             [
+                // ---- 基础设置 ----
+                ConfigField("server.properties", "properties", "motd", "服务器欢迎语 MOTD", "text", [], "A GamePanel Server", "服务器列表里显示的简介，支持 § 颜色代码", "基础设置"),
+                ConfigField("server.properties", "properties", "max-players", "最大玩家数", "number", [], "20", "", "基础设置"),
                 ConfigField("server.properties", "properties", "difficulty", "游戏难度", "select",
-                    [("peaceful", "和平"), ("easy", "简单"), ("normal", "普通"), ("hard", "困难")], "easy", "修改后重启实例生效"),
+                    [("peaceful", "和平"), ("easy", "简单"), ("normal", "普通"), ("hard", "困难")], "easy", "修改后重启实例生效", "基础设置"),
                 ConfigField("server.properties", "properties", "gamemode", "默认模式", "select",
-                    [("survival", "生存"), ("creative", "创造"), ("adventure", "冒险"), ("spectator", "旁观")], "survival", ""),
-                ConfigField("server.properties", "properties", "max-players", "最大玩家数", "number", [], "20", ""),
-                ConfigField("server.properties", "properties", "view-distance", "视距（区块）", "number", [], "10", "越大越流畅消耗越少但看得越近；8~12 常用"),
-                ConfigField("server.properties", "properties", "online-mode", "正版验证", "toggle", [], "true", "关闭可允许离线账号（安全风险自负）"),
-                ConfigField("server.properties", "properties", "white-list", "开启白名单", "toggle", [], "false", "开启后仅白名单内玩家可进"),
-                ConfigField("server.properties", "properties", "pvp", "允许 PVP", "toggle", [], "true", ""),
-                ConfigField("server.properties", "properties", "motd", "服务器欢迎语 MOTD", "text", [], "A GamePanel Server", "")
+                    [("survival", "生存"), ("creative", "创造"), ("adventure", "冒险"), ("spectator", "旁观")], "survival", "", "基础设置"),
+                ConfigField("server.properties", "properties", "resource-pack", "资源包 URL", "text", [], "", "玩家进服自动下载的资源包直链（可空）", "基础设置"),
+                // ---- 游戏性 ----
+                ConfigField("server.properties", "properties", "pvp", "允许 PVP", "toggle", [], "true", "", "游戏性"),
+                ConfigField("server.properties", "properties", "allow-flight", "允许飞行", "toggle", [], "false", "创造/旁观不受限；生存开作弊飞行需开启", "游戏性"),
+                ConfigField("server.properties", "properties", "enable-command-block", "启用命令方块", "toggle", [], "false", "地图/整合包常需要", "游戏性"),
+                ConfigField("server.properties", "properties", "spawn-monsters", "生成敌对生物", "toggle", [], "true", "关闭即无僵尸骷髅（建筑服常用）", "游戏性"),
+                ConfigField("server.properties", "properties", "spawn-animals", "生成动物", "toggle", [], "true", "", "游戏性"),
+                ConfigField("server.properties", "properties", "allow-nether", "允许下界传送门", "toggle", [], "true", "", "游戏性"),
+                ConfigField("server.properties", "properties", "force-gamemode", "锁定加入者模式", "toggle", [], "false", "进服强制回到默认模式（清掉创造权限）", "游戏性"),
+                // ---- 性能优化 ----
+                ConfigField("server.properties", "properties", "view-distance", "视距（区块）", "number", [], "10", "客户端可见范围；性能吃紧先降到 8", "性能优化"),
+                ConfigField("server.properties", "properties", "simulation-distance", "模拟距离（区块）", "number", [], "10", "生物/红石活动范围；可低于视距省性能", "性能优化"),
+                ConfigField("server.properties", "properties", "network-compression-threshold", "网络压缩阈值（字节）", "number", [], "256", "0=全压缩，-1=关闭；256 常用", "性能优化"),
+                ConfigField("server.properties", "properties", "max-tick-time", "单刻超时（毫秒）", "number", [], "60000", "超时强制崩掉卡死的世界，-1 关闭", "性能优化"),
+                ConfigField("server.properties", "properties", "sync-chunk-writes", "区块同步落盘", "toggle", [], "true", "关闭可提速但断电风险略增（HDD 建议 true）", "性能优化"),
+                // ---- 安全 ----
+                ConfigField("server.properties", "properties", "online-mode", "正版验证", "toggle", [], "true", "关闭可允许离线账号（安全风险自负）", "安全"),
+                ConfigField("server.properties", "properties", "white-list", "开启白名单", "toggle", [], "false", "开启后仅白名单内玩家可进（玩家页可批量加白）", "安全"),
+                ConfigField("server.properties", "properties", "spawn-protection", "出生点半径保护", "number", [], "16", "0=关闭；仅 OP 可在此范围破坏", "安全"),
+                ConfigField("server.properties", "properties", "enforce-secure-profile", "强制安全档案", "toggle", [], "true", "聊天签名校验，离线服需关闭", "安全"),
+                ConfigField("server.properties", "properties", "prevent-proxy-connections", "拦截代理连接", "toggle", [], "false", "", "安全")
             ]
         ))
 
