@@ -442,7 +442,9 @@ function renderInstCards(list, box) {
     const busy = !!op;
     const statusHtml = busy
       ? `<span class="dot other"></span><b>${OP_TEXT[op] || op}</b>`
-      : `<span class="dot ${i.status}"></span>${STATUS_TEXT[i.status] || i.status}`;
+      : i.status === 'running'
+        ? `<span class="dot running"></span>${i.ready ? '运行中 · 已就绪' : '启动中…'}`
+        : `<span class="dot ${i.status}"></span>${STATUS_TEXT[i.status] || i.status}`;
     return `
     <div class="card inst-card">
       <div class="inst-head">

@@ -234,6 +234,7 @@ public class Instances {
             ("version", JsonString(ins.version)),
             ("image", JsonString(ins.image)),
             ("status", JsonString(st)),
+            ("ready", JsonBool(st == "running" && Monitor.isReady(ins.id))),
             ("node", JsonString(ins.node)),
             ("useMesh", JsonBool(ins.useMesh)),
             ("ports", portsArr),

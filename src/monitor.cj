@@ -66,6 +66,9 @@ public class Monitor {
     private static var dataUsedKB: Int64 = -1
     private static var dirCheckTick: Int64 = 0
     private static let lastStatus = HashMap<String, String>()
+    // 游戏就绪检测：容器 running 后日志出现关键字即"已就绪"（真正可连入）
+    private static let readyMap = HashMap<String, Bool>()
+    private static let readyKeys = HashMap<String, String>()
     // 用户主动操作（停止/重启/删除）时间戳，用于区分意外退出
     private static let userActionAt = HashMap<String, Int64>()
     private static let MAX_POINTS = 120
@@ -73,6 +76,10 @@ public class Monitor {
 
     static init() {
         notifyUrl = getVariable("GP_NOTIFY_URL") ?? ""
+        readyKeys.add("minecraft", "Done (")
+        readyKeys.add("dst", "Sim paused")
+        readyKeys.add("terraria", "server started")
+        readyKeys.add("zomboid", "SERVER STARTED")
     }
 
     public static func start() {
@@ -163,6 +170,7 @@ public class Monitor {
                 trackStatus(ins, st)
                 if (st == "running") {
                     takeSample(ins)
+                    checkReady(ins)
                 } else {
                     mutex.lock()
                     latest.remove(ins.id)
@@ -192,6 +200,9 @@ public class Monitor {
         let prev = lastStatus.get(ins.id) ?? ""
         if (prev != st) {
             lastStatus.add(ins.id, st)
+            if (st == "running") {
+                readyMap.remove(ins.id)   // 新启动：重新等待就绪关键字
+            }
             if (prev == "running" && (st == "exited" || st == "missing")) {
                 let act = userActionAt.get(ins.id) ?? 0
                 let now = Backups.nowMs() / 1000
@@ -253,6 +264,40 @@ public class Monitor {
     /* 用户主动停止/重启/删除前调用，避免误报 */
     public static func markUserAction(id: String) {
         userActionAt.add(id, Backups.nowMs() / 1000)
+    }
+
+    /* 就绪检测：未就绪实例每轮拉日志尾部 80 行匹配关键字；命中即标记（此后不再拉） */
+    static func checkReady(ins: Instance): Unit {
+        mutex.lock()
+        let already = readyMap.get(ins.id) ?? false
+        mutex.unlock()
+        if (already) {
+            return
+        }
+        // 启动后至少 10 秒再查，避免旧日志误命中（容器刚重建时 docker logs 可能仍返回上一世内容）
+        let act = userActionAt.get(ins.id) ?? 0
+        if (act > 0 && Backups.nowMs() / 1000 - act < 10) {
+            return
+        }
+        let key = readyKeys.get(ins.game) ?? ""
+        if (key == "") {
+            return
+        }
+        // 大小写不敏感匹配（TShock 输出 "Server started"，PZ 输出 "SERVER STARTED"）
+        let logsLow = Docker.logs(ins.containerName(), 80, node: ins.node).toAsciiLower()
+        if (logsLow.contains(key.toAsciiLower())) {
+            mutex.lock()
+            readyMap.add(ins.id, true)
+            mutex.unlock()
+            println("[monitor] 实例 ${ins.name}(${ins.game}) 已就绪（日志命中: ${key}）")
+        }
+    }
+
+    public static func isReady(id: String): Bool {
+        mutex.lock()
+        let v = readyMap.get(id) ?? false
+        mutex.unlock()
+        return v
     }
 
     static func takeSample(ins: Instance): Unit {
@@ -365,6 +410,7 @@ public class Monitor {
         lastStatus.remove(id)
         userActionAt.remove(id)
         latest.remove(id)
+        readyMap.remove(id)
         mutex.unlock()
     }
 }
