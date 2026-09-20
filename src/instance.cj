@@ -364,9 +364,13 @@ public func registerInstanceRoutes(): Unit {
                     case Some(_) => ()
                 }
                 let cmd = Jsons.text(body.get("cmd") ?? JsonString("")).trimAscii()
-                let ok = ConsolePipe.send(ins, cmd)
+                let (ok, echo) = ConsolePipe.send(ins, cmd)
                 if (ok) {
-                    HttpUtil.okMsg(ctx, "已发送")
+                    if (echo != "") {
+                        HttpUtil.ok(ctx, Jsons.obj([("output", JsonString(echo))]))
+                    } else {
+                        HttpUtil.okMsg(ctx, "已发送")
+                    }
                 } else {
                     HttpUtil.fail(ctx, 3007, "发送失败：该游戏镜像可能不支持控制台输入")
                 }
@@ -469,6 +473,7 @@ public func rebuild(id: String): Unit {
     match (Store.data().findInstance(id)) {
         case Some(ins) =>
             Monitor.markUserAction(ins.id)
+            Monitor.resetReady(ins.id)
             ConsolePipe.detach(ins.id)
             Docker.forceRemove(ins.containerName(), node: ins.node)
             let r = Docker.runInstance(ins)
@@ -990,6 +995,7 @@ public func registerLifecycleRoutes(): Unit {
         case Some(ins) =>
             match (action) {
                 case "start" =>
+                    Monitor.resetReady(ins.id)
                     if (!Docker.exists(ins.containerName(), node: ins.node)) {
                         // 容器丢失（宿主机清理/手动删除）：数据在 bind mount 完好，自动重建
                         Ops.runAsync(ins.id, "starting", { =>
@@ -1029,6 +1035,7 @@ public func registerLifecycleRoutes(): Unit {
                     HttpUtil.okMsg(ctx, "停止指令已下发（优雅关服中，完成后状态自动刷新）")
                 case "restart" =>
                     Monitor.markUserAction(ins.id)
+                    Monitor.resetReady(ins.id)
                     ConsolePipe.detach(ins.id)
                     Ops.runAsync(ins.id, "restarting", { =>
                         let r = Docker.restart(ins.containerName(), node: ins.node)

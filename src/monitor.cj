@@ -69,6 +69,8 @@ public class Monitor {
     // 游戏就绪检测：容器 running 后日志出现关键字即"已就绪"（真正可连入）
     private static let readyMap = HashMap<String, Bool>()
     private static let readyKeys = HashMap<String, String>()
+    // 最近一次转 running 的时刻：就绪检测只看此后日志，避免重启残留的旧 Done 造成假就绪
+    private static let startedAtMap = HashMap<String, Int64>()
     // 用户主动操作（停止/重启/删除）时间戳，用于区分意外退出
     private static let userActionAt = HashMap<String, Int64>()
     private static let MAX_POINTS = 120
@@ -202,6 +204,7 @@ public class Monitor {
             lastStatus.add(ins.id, st)
             if (st == "running") {
                 readyMap.remove(ins.id)   // 新启动：重新等待就绪关键字
+                startedAtMap.add(ins.id, Auth.nowSec())
             }
             if (prev == "running" && (st == "exited" || st == "missing")) {
                 let act = userActionAt.get(ins.id) ?? 0
@@ -283,14 +286,25 @@ public class Monitor {
         if (key == "") {
             return
         }
-        // 大小写不敏感匹配（TShock 输出 "Server started"，PZ 输出 "SERVER STARTED"）
-        let logsLow = Docker.logs(ins.containerName(), 80, node: ins.node).toAsciiLower()
+        // 大小写不敏感匹配；只看本次启动之后的日志（docker restart 后 logs 连续，
+        // 尾部残留的旧 Done 行会造成假就绪，进而 RCON 连接被拒）
+        let since = startedAtMap.get(ins.id) ?? 0
+        let logsLow = Docker.logs(ins.containerName(), 200, sinceUnix: since, node: ins.node).toAsciiLower()
         if (logsLow.contains(key.toAsciiLower())) {
             mutex.lock()
             readyMap.add(ins.id, true)
             mutex.unlock()
             println("[monitor] 实例 ${ins.name}(${ins.game}) 已就绪（日志命中: ${key}）")
         }
+    }
+
+    /* 生命周期操作（start/restart/rebuild）主动重置就绪：30 秒轮询可能错过短暂重启窗口，
+       旧 ready=true 会残留成假就绪（RCON/世界文件操作提前执行即失败） */
+    public static func resetReady(id: String) {
+        mutex.lock()
+        readyMap.remove(id)
+        startedAtMap.add(id, Auth.nowSec())
+        mutex.unlock()
     }
 
     public static func isReady(id: String): Bool {

@@ -91,8 +91,15 @@ public class Docker {
     }
 
     /* 取容器日志（尾部 tail 行） */
-    public static func logs(name: String, tail: Int64, node!: String = "local"): String {
-        let r = run(["logs", "--tail", tail.toString(), "--timestamps", name], node: node)
+    /* sinceUnix=0 时不过滤；否则只取该时间点之后的日志（就绪检测用，滤掉重启前残留） */
+    public static func logs(name: String, tail: Int64, sinceUnix!: Int64 = 0, node!: String = "local"): String {
+        let args = ArrayList<String>(["logs", "--tail", tail.toString(), "--timestamps"])
+        if (sinceUnix > 0) {
+            args.add("--since")
+            args.add(sinceUnix.toString())
+        }
+        args.add(name)
+        let r = run(args.toArray(), node: node)
         if (!r.ok()) {
             return r.stderr.trimAscii()
         }
@@ -249,13 +256,14 @@ public class ConsolePipe {
         }
     }
 
-    /* 向实例控制台发送一条命令 */
-    public static func send(ins: Instance, cmd: String): Bool {
-        // Minecraft 走 rcon-cli（同步拿到回显）
+    /* 向实例控制台发送一条命令；返回 (是否成功, RCON 同步回显——仅 Minecraft) */
+    public static func send(ins: Instance, cmd: String): (Bool, String) {
+        // Minecraft 走 rcon-cli（同步拿到回显）；显式 IPv4：容器内 localhost 会优先解析为
+        // ::1，而 MC 的 RCON 只绑 0.0.0.0（IPv4），导致 connection refused
         if (ins.game == "minecraft") {
-            let r = Docker.exec(ins.containerName(), ["rcon-cli", cmd], node: ins.node)
+            let r = Docker.exec(ins.containerName(), ["rcon-cli", "--host", "127.0.0.1", cmd], node: ins.node)
             if (r.ok()) {
-                return true
+                return (true, r.stdout.trimAscii())
             }
         }
         // 通用路径：写入 attach 进程 stdin
@@ -266,7 +274,7 @@ public class ConsolePipe {
             case Some(proc) =>
                 try {
                     proc.stdInPipe.write((cmd + "\n").toArray())
-                    return true
+                    return (true, "")
                 } catch (e: Exception) {
                     println("[console] 写入 ${ins.id} 失败: ${e.message}")
                 }
@@ -283,13 +291,13 @@ public class ConsolePipe {
                 case Some(proc) =>
                     try {
                         proc.stdInPipe.write((cmd + "\n").toArray())
-                        return true
+                        return (true, "")
                     } catch (_: Exception) {
-                        return false
+                        return (false, "")
                     }
-                case None => return false
+                case None => return (false, "")
             }
         }
-        return false
+        return (false, "")
     }
 }

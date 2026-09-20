@@ -50,7 +50,7 @@ public class Players {
         if (Docker.status(ins.containerName()) != "running") {
             return []
         }
-        let r = Docker.exec(ins.containerName(), ["rcon-cli", "list"])
+        let r = Docker.exec(ins.containerName(), ["rcon-cli", "--host", "127.0.0.1", "list"])
         if (!r.ok()) {
             return []
         }
@@ -69,13 +69,13 @@ public class Players {
     /* 动作 -> docker exec rcon-cli 命令映射（rcon-cli 是 itzg 镜像内置的 RCON 客户端） */
     static func rconFor(action: String, player: String): ?Array<String> {
         match (action) {
-            case "whitelist-add" => return Some(["rcon-cli", "whitelist", "add", player])
-            case "whitelist-remove" => return Some(["rcon-cli", "whitelist", "remove", player])
-            case "op" => return Some(["rcon-cli", "op", player])
-            case "deop" => return Some(["rcon-cli", "deop", player])
-            case "ban" => return Some(["rcon-cli", "ban", player])
-            case "pardon" => return Some(["rcon-cli", "pardon", player])
-            case "kick" => return Some(["rcon-cli", "kick", player])
+            case "whitelist-add" => return Some(["rcon-cli", "--host", "127.0.0.1", "whitelist", "add", player])
+            case "whitelist-remove" => return Some(["rcon-cli", "--host", "127.0.0.1", "whitelist", "remove", player])
+            case "op" => return Some(["rcon-cli", "--host", "127.0.0.1", "op", player])
+            case "deop" => return Some(["rcon-cli", "--host", "127.0.0.1", "deop", player])
+            case "ban" => return Some(["rcon-cli", "--host", "127.0.0.1", "ban", player])
+            case "pardon" => return Some(["rcon-cli", "--host", "127.0.0.1", "pardon", player])
+            case "kick" => return Some(["rcon-cli", "--host", "127.0.0.1", "kick", player])
             case _ => return None
         }
     }

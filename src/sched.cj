@@ -278,7 +278,8 @@ public class Scheduler {
                     err = Some(r.stderr.trimAscii())
                 }
             case "command" =>
-                if (!ConsolePipe.send(ins, t.command)) {
+                let (sent, _) = ConsolePipe.send(ins, t.command)
+                if (!sent) {
                     err = Some("命令发送失败")
                 }
             case _ => err = Some("未知动作: ${t.action}")

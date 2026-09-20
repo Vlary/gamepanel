@@ -67,7 +67,10 @@ public func registerWsRoutes(): Unit {
                         if (frame.frameType == WebSocketFrameType.TextWebFrame) {
                             let text = String.fromUtf8(frame.payload)
                             if (text != "") {
-                                let sent = ConsolePipe.send(ins, text)
+                                let (sent, echo) = ConsolePipe.send(ins, text)
+                                if (sent && echo != "") {
+                                    conn.write(WebSocketFrameType.TextWebFrame, (echo + "\n").toArray())
+                                }
                                 if (!sent) {
                                     conn.write(WebSocketFrameType.TextWebFrame, ("[面板] 命令未能送达（实例可能未运行）\n").toArray())
                                 }
