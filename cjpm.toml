@@ -1,0 +1,22 @@
+[package]
+  cjc-version = "1.1.3"
+  name = "gamepanel"
+  organization = ""
+  description = "游戏方舟 —— 容器化游戏服务器管理面板（仓颉实现）"
+  version = "1.0.0"
+  target-dir = ""
+  script-dir = ""
+  output-type = "executable"
+  compile-option = "-Woff unused"
+  # stdx 扩展库链接配置（SDK + stdx 安装路径见 scripts/setup-env.sh）
+  link-option = "-L/home/vlary/cangjie/modules/linux_x86_64_cjnative/stdx --start-group -lstdx.net.http -lstdx.net -lstdx.net.tls -lstdx.net.tls.common -lstdx.encoding.json -lstdx.encoding.json.stream -lstdx.encoding.url -lstdx.encoding.hex -lstdx.encoding.base64 -lstdx.log -lstdx.logger -lstdx.crypto -lstdx.crypto.common -lstdx.crypto.digest -lstdx.crypto.keys -lstdx.crypto.x509 -lstdx.crypto.crypto -lstdx.serialization.serialization -lstdx.string_intern --end-group"
+
+[target.x86_64-unknown-linux-gnu.bin-dependencies.package-option]
+  "stdx.net.http" = "/home/vlary/cangjie/modules/linux_x86_64_cjnative/stdx/stdx.net.http.cjo"
+  "stdx.encoding.json" = "/home/vlary/cangjie/modules/linux_x86_64_cjnative/stdx/stdx.encoding.json.cjo"
+  "stdx.log" = "/home/vlary/cangjie/modules/linux_x86_64_cjnative/stdx/stdx.log.cjo"
+  "stdx.encoding.url" = "/home/vlary/cangjie/modules/linux_x86_64_cjnative/stdx/stdx.encoding.url.cjo"
+  "stdx.crypto.digest" = "/home/vlary/cangjie/modules/linux_x86_64_cjnative/stdx/stdx.crypto.digest.cjo"
+  "stdx.net.tls" = "/home/vlary/cangjie/modules/linux_x86_64_cjnative/stdx/stdx.net.tls.cjo"
+
+[dependencies]

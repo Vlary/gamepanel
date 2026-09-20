@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>游戏方舟 · 服务器面板</title>
+  <link rel="stylesheet" href="/s/css/style.css?v=3.1">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⛵</text></svg>">
+</head>
+<body>
+  <!-- 登录页 -->
+  <div id="login-page" class="login-wrap hidden">
+    <div class="login-card">
+      <div class="login-logo">⛵ 游戏方舟</div>
+      <div class="login-sub">容器化游戏服务器管理面板 <span class="muted" style="font-size:11px">v2.5</span></div>
+      <input type="text" id="login-user" placeholder="用户名（默认 admin）" autocomplete="username">
+      <input type="password" id="login-pass" placeholder="密码" autocomplete="current-password">
+      <button id="login-btn" class="btn primary block">登 录</button>
+      <div id="login-err" class="login-err"></div>
+    </div>
+  </div>
+
+  <!-- 主界面 -->
+  <div id="app" class="app hidden">
+    <header class="topbar">
+      <div class="brand">⛵ 游戏方舟</div>
+      <div class="top-stats" id="top-stats"></div>
+      <div class="top-right">
+        <span id="docker-badge" class="badge"></span>
+        <button class="btn ghost small" onclick="showCreateDialog()">＋ 创建实例</button>
+        <button class="btn ghost small" onclick="logout()">退出</button>
+      </div>
+    </header>
+    <div class="body">
+      <nav class="sidenav">
+        <a data-view="overview" class="nav-item active" onclick="switchView('overview')">📊 总览</a>
+        <a data-view="instances" class="nav-item" onclick="switchView('instances')">🎮 实例列表</a>
+        <a data-view="tasks" class="nav-item" onclick="switchView('tasks')">⏰ 计划任务</a>
+        <a data-view="mesh" class="nav-item" onclick="switchView('mesh')">🕸 联机组网</a>
+        <a data-view="about" class="nav-item" onclick="switchView('about')">ℹ️ 说明</a>
+      </nav>
+      <main id="main" class="main"></main>
+    </div>
+  </div>
+
+  <!-- 模态框容器 -->
+  <div id="modal-root"></div>
+  <div id="toast-root"></div>
+
+  <script src="/s/js/app.js?v=3.1"></script>
+</body>
+</html>
