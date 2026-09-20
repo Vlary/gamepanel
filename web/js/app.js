@@ -677,12 +677,76 @@ function cmdHistKey(e) {
 
 /* ----- 文件管理 ----- */
 
+let FILES_SORT = { key: 'name', dir: 1 };   // name | size，dir 1=升 -1=降
+let FILES_SEL = new Set();                   // 多选的相对路径
+
+function filesSortKey() {
+  const label = { name: '名称', size: '大小' }[FILES_SORT.key];
+  return `按${label}${FILES_SORT.dir > 0 ? '↑' : '↓'}`;
+}
+
+function filesToggleSort() {
+  if (FILES_SORT.key === 'name') {
+    FILES_SORT = FILES_SORT.dir > 0 ? { key: 'name', dir: -1 } : { key: 'size', dir: 1 };
+  } else {
+    FILES_SORT = FILES_SORT.dir > 0 ? { key: 'size', dir: -1 } : { key: 'name', dir: 1 };
+  }
+  renderFiles();
+}
+
+function filesSorted(d) {
+  const arr = [...d.dirs.map(x => ({ ...x, isDir: true })), ...d.files.map(x => ({ ...x, isDir: false }))];
+  arr.sort((a, b) => {
+    if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;   // 目录永远在前
+    let c = 0;
+    if (FILES_SORT.key === 'size') c = (a.size || 0) - (b.size || 0);
+    else c = a.name.localeCompare(b.name, 'zh-CN', { numeric: true });
+    return c * FILES_SORT.dir;
+  });
+  return arr;
+}
+
+function fileSelToggle(path, checked) {
+  if (checked) FILES_SEL.add(path); else FILES_SEL.delete(path);
+  const n = FILES_SEL.size;
+  const bar = $('#files-selbar');
+  if (bar) bar.innerHTML = n
+    ? `<span class="muted">已选 <b>${n}</b> 项</span> <button class="btn small danger" onclick="filesBatchDelete()">批量删除</button> <button class="btn small" onclick="filesSelClear()">取消选择</button>`
+    : '';
+}
+
+function filesSelAll(cb) {
+  FILES_SEL.clear();
+  if (cb.checked) $$('.file-check').forEach(c => { c.checked = true; FILES_SEL.add(c.dataset.path); });
+  fileSelToggle('', false);
+}
+
+function filesSelClear() { FILES_SEL.clear(); renderFiles(); }
+
+async function filesBatchDelete() {
+  const n = FILES_SEL.size;
+  if (!n) return;
+  confirmModal('批量删除', `确定删除选中的 <b>${n}</b> 项？此操作不可恢复。`, async () => {
+    let ok = 0, fail = 0;
+    for (const p of FILES_SEL) {
+      const r = await api(`/instances/${CUR.id}/file-action`, { method: 'POST', body: { action: 'delete', path: p } });
+      r.code === 0 ? ok++ : fail++;
+    }
+    toast(`批量删除完成：成功 ${ok}${fail ? '，失败 ' + fail : ''}`, fail ? 'err' : 'ok');
+    FILES_SEL.clear();
+    closeModal();
+    renderFiles();
+  });
+}
+
 async function renderFiles() {
   const r = await api(`/instances/${CUR.id}/files?path=${encodeURIComponent(CUR_PATH)}`);
   const box = $('#tab-body');
   if (r.code !== 0) { box.innerHTML = '<div class="card">加载失败</div>'; return; }
   const d = r.data;
   if (d.error) { box.innerHTML = `<div class="card">${esc(d.error)}</div>`; return; }
+  FILES_SEL.clear();
+  const items = filesSorted(d);
   const crumbs = ['<a onclick="gotoPath(\'\')">根目录</a>'];
   let acc = '';
   CUR_PATH.split('/').filter(Boolean).forEach(seg => {
@@ -690,29 +754,67 @@ async function renderFiles() {
     const p = acc.replace(/'/g, "\\'");
     crumbs.push(`/ <a onclick="gotoPath('${p}')">${esc(seg)}</a>`);
   });
-  const rows = [...d.dirs, ...d.files].map(f => `
+  const rows = items.map(f => {
+    const p = joinPath(f.name);
+    const pe = p.replace(/'/g, "\\'");
+    return `
     <div class="file-row">
-      <span class="fname" onclick="${f.isDir ? `gotoPath('${joinPath(f.name)}')` : `openFile('${joinPath(f.name)}', ${f.size})`}">
+      <input type="checkbox" class="file-check" data-path="${esc(p)}" ${FILES_SEL.has(p) ? 'checked' : ''} onchange="fileSelToggle('${pe}', this.checked)" style="margin-right:8px">
+      <span class="fname" onclick="${f.isDir ? `gotoPath('${pe}')` : `openFile('${pe}', ${f.size})`}">
         <span class="file-icon">${f.isDir ? '📁' : fileIcon(f.name)}</span>${esc(f.name)}
       </span>
       <span class="fsize">${f.isDir ? '-' : fmtSize(f.size)}</span>
       <span class="file-ops">
-        ${/\.(zip|tar\.gz|tgz|tar)$/i.test(f.name) ? `<button class="btn small" onclick="extractFile('${joinPath(f.name)}')">解压</button>` : ''}
-        <button class="btn small" onclick="downloadFile('${joinPath(f.name)}')">下载</button>
-        ${!f.isDir ? `<button class="btn small" onclick="renameFile('${joinPath(f.name)}','${esc(f.name)}')">重命名</button>` : ''}
-        <button class="btn small danger" onclick="deleteFile('${joinPath(f.name)}')">删除</button>
+        ${/\.(zip|tar\.gz|tgz|tar)$/i.test(f.name) ? `<button class="btn small" onclick="extractFile('${pe}')">解压</button>` : ''}
+        <button class="btn small" onclick="downloadFile('${pe}')">下载</button>
+        ${!f.isDir ? `<button class="btn small" onclick="renameFile('${pe}','${esc(f.name)}')">重命名</button>` : ''}
+        <button class="btn small danger" onclick="deleteFile('${pe}')">删除</button>
       </span>
-    </div>`).join('');
-  $('#tab-body').innerHTML = `
+    </div>`;
+  }).join('');
+  const total = items.length;
+  box.innerHTML = `
     <div class="card">
       <div class="crumbs">${crumbs.join(' ')}</div>
-      <div class="mb" style="display:flex;gap:8px">
+      <div class="mb" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <button class="btn small" onclick="mkdirDialog()">新建文件夹</button>
-        <label class="btn small">上传文件<input type="file" style="display:none" onchange="uploadFile(this)"></label>
+        <label class="btn small">上传文件<input type="file" style="display:none" multiple onchange="uploadFile(this)"></label>
+        <button class="btn small" onclick="filesToggleSort()" title="切换排序">↕ ${filesSortKey()}</button>
         ${CUR_PATH ? '<button class="btn small" onclick="gotoPath(parentPath())">⬆ 上级</button>' : ''}
+        <span id="files-selbar" style="display:flex;gap:8px;align-items:center;margin-left:auto"></span>
       </div>
-      <div>${rows || '<div class="empty-tip">空目录</div>'}</div>
+      ${total ? `<div style="display:flex;gap:8px;align-items:center;padding:4px 8px;color:var(--muted);font-size:12px">
+        <input type="checkbox" onchange="filesSelAll(this)" title="全选">
+        <span>${total} 项（目录 ${d.dirs.length} · 文件 ${d.files.length}）</span>
+      </div>` : ''}
+      <div id="files-dropzone" style="position:relative" ondragover="filesDrag(event, true)" ondragleave="filesDrag(event, false)" ondrop="filesDrop(event)">
+        <div id="files-drophint" class="hidden" style="position:absolute;inset:0;z-index:5;display:flex;align-items:center;justify-content:center;border:2px dashed var(--primary);border-radius:8px;background:var(--primary-soft);font-weight:600;pointer-events:none">📥 松开以上传到当前目录</div>
+        ${rows || emptyState('📂', '空目录', '拖拽文件到此区域即可上传')}
+      </div>
     </div>`;
+}
+
+function filesDrag(e, over) {
+  e.preventDefault();
+  const hint = $('#files-drophint');
+  if (hint) hint.classList.toggle('hidden', !over);
+}
+
+async function filesDrop(e) {
+  e.preventDefault();
+  filesDrag(e, false);
+  const files = e.dataTransfer?.files;
+  if (!files || !files.length) return;
+  let ok = 0, fail = 0;
+  for (const f of files) {
+    const path = (CUR_PATH ? CUR_PATH + '/' : '') + f.name;
+    const r = await fetch(`/api/v1/instances/${CUR.id}/file?path=${encodeURIComponent(path)}`, {
+      method: 'PUT', headers: { 'Authorization': 'Bearer ' + TOKEN }, body: f
+    }).then(r => r.json()).catch(() => ({ code: -1 }));
+    r.code === 0 ? ok++ : fail++;
+  }
+  toast(`拖拽上传完成：成功 ${ok}${fail ? '，失败 ' + fail : ''}`, fail ? 'err' : 'ok');
+  renderFiles();
 }
 
 function fileIcon(name) {
@@ -775,15 +877,18 @@ async function saveFile(path) {
 
 async function uploadFile(input) {
   if (!CUR) { toast('请先从列表打开实例详情', 'err'); return; }
-
-  const file = input.files[0];
-  if (!file) return;
-  toast(`上传 ${file.name}（${fmtSize(file.size)}）中…`, '');
-  const path = (CUR_PATH ? CUR_PATH + '/' : '') + file.name;
-  const r = await fetch(`/api/v1/instances/${CUR.id}/file?path=${encodeURIComponent(path)}`, {
-    method: 'PUT', headers: { 'Authorization': 'Bearer ' + TOKEN }, body: file
-  }).then(r => r.json());
-  toast(r.msg, r.code === 0 ? 'ok' : 'err');
+  const files = [...(input.files || [])];
+  if (!files.length) return;
+  let ok = 0, fail = 0;
+  for (const file of files) {
+    const path = (CUR_PATH ? CUR_PATH + '/' : '') + file.name;
+    const r = await fetch(`/api/v1/instances/${CUR.id}/file?path=${encodeURIComponent(path)}`, {
+      method: 'PUT', headers: { 'Authorization': 'Bearer ' + TOKEN }, body: file
+    }).then(r => r.json()).catch(() => ({ code: -1 }));
+    r.code === 0 ? ok++ : fail++;
+  }
+  toast(`上传完成：成功 ${ok}${fail ? '，失败 ' + fail : ''}`, fail ? 'err' : 'ok');
+  input.value = '';
   renderFiles();
 }
 
