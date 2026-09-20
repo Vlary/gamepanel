@@ -637,6 +637,7 @@ async function loadConsole(first) {
   if (!consoleTimer) consoleTimer = setInterval(() => loadConsole(false), 2500);
 }
 
+let CUR_RECS = [];
 let cmdHistory = [];
 let cmdHistIdx = -1;
 
@@ -852,29 +853,61 @@ async function fileAction(action, path, newName) {
 /* ----- 备份 / 快照 ----- */
 
 async function renderRecords(kind) {
-  const r = await api(`/instances/${CUR.id}/records?kind=${kind}`);
-  if (r.code !== 0) return;
+  const [recR, taskR] = await Promise.all([
+    api(`/instances/${CUR.id}/records?kind=${kind}`),
+    api('/tasks').catch(() => ({ code: -1, data: [] }))
+  ]);
+  if (recR.code !== 0) return;
+  const recs = recR.data || [];
+  CUR_RECS = recs;
   const title = kind === 'backup' ? '备份（全量目录）' : '快照（仅存档，秒级回档）';
-  const rows = r.data.map(rec => `
+  // 统计概览
+  const totalBytes = recs.reduce((a, r) => a + (r.sizeBytes || 0), 0);
+  const latest = recs[0];
+  const hasAuto = (taskR.data || []).some(t => t.instanceId === CUR.id && (t.action === 'backup' || t.action === 'snapshot') && t.enabled);
+  const rows = recs.map(rec => `
     <tr>
       <td>${esc(rec.name)}</td>
       <td>${fmtSize(rec.sizeBytes)}</td>
       <td class="muted">${esc(rec.createdAt)}</td>
-      <td>${rec.auto ? '计划任务' : '手动'}</td>
+      <td>${rec.auto ? '<span class="badge badge-info">计划任务</span>' : '<span class="badge badge-off">手动</span>'}</td>
       <td>
+        <button class="btn small" onclick="previewRec('${rec.id}')">👁 预览</button>
         <button class="btn small" onclick="restoreRec('${rec.id}')">恢复</button>
         <button class="btn small" onclick="downloadRec('${rec.id}')">下载</button>
         <button class="btn small danger" onclick="delRec('${rec.id}')">删除</button>
       </td>
     </tr>`).join('');
   $('#tab-body').innerHTML = `
+    <div class="grid cols-4 mb">
+      <div class="card lift"><div class="stat-num">${recs.length}</div><div class="stat-label">${kind === 'backup' ? '备份' : '快照'}总数</div></div>
+      <div class="card lift"><div class="stat-num">${fmtSize(totalBytes)}</div><div class="stat-label">归档总大小</div></div>
+      <div class="card lift"><div class="stat-num" style="font-size:17px;line-height:39px">${latest ? esc(latest.createdAt) : '—'}</div><div class="stat-label">最近一次</div></div>
+      <div class="card lift"><div class="stat-num" style="font-size:15px;line-height:39px">${hasAuto ? '✅ 已配置' : '⚠️ 未配置'}</div><div class="stat-label">自动${kind === 'backup' ? '备份' : '快照'}</div></div>
+    </div>
+    ${!hasAuto && recs.length ? `<div class="kv-note">💡 还没有自动${kind === 'backup' ? '备份' : '快照'}计划 —— 到「计划任务」页添加 <b>0 4 * * *</b>（每日凌晨 4 点）可高枕无忧。</div>` : ''}
     <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
         <h3 style="margin:0">${title}</h3>
         <button class="btn primary" onclick="createRec('${kind}')">＋ 立即${kind === 'backup' ? '备份' : '快照'}</button>
       </div>
-      ${r.data.length ? `<table class="tbl"><tr><th>名称</th><th>大小</th><th>创建时间</th><th>来源</th><th>操作</th></tr>${rows}</table>` : '<div class="empty-tip">暂无记录</div>'}
+      ${recs.length ? `<table class="tbl"><tr><th>名称</th><th>大小</th><th>创建时间</th><th>来源</th><th>操作</th></tr>${rows}</table>` : emptyState('🗄', '暂无' + (kind === 'backup' ? '备份' : '快照'), '创建第一个归档，世界就有后悔药了', `<button class="btn primary" onclick="createRec('${kind}')">＋ 立即${kind === 'backup' ? '备份' : '快照'}</button>`)}
     </div>`;
+}
+
+/* 归档内容预览（tar 文件清单） */
+async function previewRec(rid) {
+  modal('👁 归档预览', '<div class="empty-tip">读取归档清单中…</div>');
+  const r = await api(`/records/${rid}/preview`);
+  if (r.code !== 0) { modal('👁 归档预览', `<div class="kv-note">${esc(r.msg)}</div>`); return; }
+  const d = r.data;
+  modal(`👁 ${esc(d.name)}（${fmtSize(d.sizeBytes)} · ${esc(d.createdAt)}）`, `
+    <div class="kv-note">共 <b>${d.total}</b> 个条目${d.truncated ? `（仅显示前 ${d.entries.length} 个）` : ''}；${d.kind === 'snapshot' ? '快照仅含存档目录，恢复只覆盖存档' : '全量备份包含整个数据目录，恢复即整体回滚'}</div>
+    <div class="console-box" style="height:320px">${d.entries.map(e => esc(e)).join('\n')}</div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal()">关闭</button>
+      <button class="btn danger" onclick="closeModal();restoreRec('${rid}')">从此归档恢复…</button>
+    </div>`);
 }
 
 async function createRec(kind) {
@@ -898,8 +931,13 @@ async function createRec(kind) {
 
 async function restoreRec(rid) {
   if (!CUR) { toast('请先从列表打开实例详情', 'err'); return; }
-
-  confirmModal('恢复确认', '恢复会覆盖当前存档/文件，且要求实例处于停止状态。继续？', async () => {
+  const rec = (CUR_RECS || []).find(r => r.id === rid);
+  const info = rec ? `${esc(rec.name)}（${fmtSize(rec.sizeBytes)} · ${esc(rec.createdAt)}）` : rid;
+  confirmModal('恢复确认', `
+    <p>即将从以下归档恢复：</p>
+    <p><b>${info}</b></p>
+    <p class="muted">恢复前会自动创建保护快照（恢复错了还能再回）。要求实例处于停止状态，进行中会短暂锁定操作。</p>
+    <p style="color:var(--red)">⚠️ 当前数据将被归档内容覆盖，确定继续？</p>`, async () => {
     const r = await api(`/records/${rid}/restore`, { method: 'POST' });
     toast(r.msg, r.code === 0 ? 'ok' : 'err');
     closeModal();

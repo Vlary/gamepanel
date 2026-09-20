@@ -265,6 +265,49 @@ public func registerBackupRoutes(): Unit {
         }
     })
 
+    /* 归档内容预览：tar -tzf 列文件（前 300 行），恢复前看清里面是什么 */
+    router.get("/api/v1/records/{rid}/preview", { ctx, md =>
+        if (!Auth.guard(ctx)) {
+            return
+        }
+        match (Store.data().findRecord(md.matchString("rid"))) {
+            case Some(rec) =>
+                let recFile = Backups.absPath(rec)
+                if (!exists(recFile)) {
+                    HttpUtil.fail(ctx, 4002, "归档文件不存在")
+                    return
+                }
+                let (code, out, _) = Process.runOutput("tar", ["-tzf", recFile])
+                if (code != 0) {
+                    HttpUtil.fail(ctx, 4003, "读取归档失败: ${String.fromUtf8(out).trimAscii()}")
+                    return
+                }
+                let all = String.fromUtf8(out).split("\n")
+                let entries = JsonArray()
+                var n: Int64 = 0
+                for (e in all) {
+                    let t = e.trimAscii()
+                    if (t == "") {
+                        continue
+                    }
+                    n += 1
+                    if (entries.size() < 300) {
+                        entries.add(JsonString(t))
+                    }
+                }
+                HttpUtil.ok(ctx, Jsons.obj([
+                    ("name", JsonString(rec.name)),
+                    ("kind", JsonString(rec.kind)),
+                    ("sizeBytes", JsonInt(rec.sizeBytes)),
+                    ("createdAt", JsonString(rec.createdAt)),
+                    ("total", JsonInt(n)),
+                    ("truncated", JsonBool(n > entries.size())),
+                    ("entries", entries)
+                ]))
+            case None => HttpUtil.fail(ctx, 404, "记录不存在")
+        }
+    })
+
     /* 下载归档 */
     router.get("/api/v1/records/{rid}/download", { ctx, md =>
         if (!Auth.guard(ctx)) {
