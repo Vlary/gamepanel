@@ -146,6 +146,7 @@ func registerRoutes(): Unit {
     registerModRoutes()
     registerSystemRoutes()
     registerDiagRoutes()
+    registerNotifyRoutes()
     registerMonitorRoutes()
     registerGameCfgRoutes()
     registerImportRoutes()

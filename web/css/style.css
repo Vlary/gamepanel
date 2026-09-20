@@ -361,3 +361,22 @@ input.inp:focus, select.inp:focus, textarea.inp:focus { border-color: var(--prim
   background: var(--primary); color: #fff; border: none;
   box-shadow: var(--shadow-lg); animation: fadein .2s;
 }
+
+/* ---------- 通知中心 ---------- */
+.bell-dot {
+  position: absolute; top: 2px; right: 2px; min-width: 16px; height: 16px;
+  background: var(--red); color: #fff; border-radius: 9px; font-size: 10px;
+  display: flex; align-items: center; justify-content: center; padding: 0 4px;
+  font-weight: 700; box-shadow: 0 0 0 2px var(--card);
+}
+.notify-panel {
+  position: fixed; top: 58px; right: 14px; width: 380px; max-width: 94vw;
+  background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+  box-shadow: var(--shadow-lg); padding: 14px; z-index: 150; animation: fadein .18s;
+}
+.notify-item {
+  display: flex; gap: 10px; padding: 9px 8px; border-radius: 8px; align-items: flex-start;
+}
+.notify-item:hover { background: var(--card-hover); }
+.notify-item.unread { background: var(--primary-soft); }
+.notify-item.unread:hover { background: var(--primary-soft); }

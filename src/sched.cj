@@ -284,7 +284,9 @@ public class Scheduler {
             case _ => err = Some("未知动作: ${t.action}")
         }
         match (err) {
-            case Some(e) => println("[sched] 任务 ${t.name} 执行失败: ${e}")
+            case Some(e) =>
+                println("[sched] 任务 ${t.name} 执行失败: ${e}")
+                Notifications.push("task", "计划任务失败：${t.name}", e)
             case None => ()
         }
         // 执行历史（环形 20 条，随任务持久化，重启不丢）

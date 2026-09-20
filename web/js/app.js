@@ -147,6 +147,7 @@ function showLogin() {
 function showApp() {
   $('#login-page').classList.add('hidden');
   $('#app').classList.remove('hidden');
+  startNotifyPolling();
 }
 
 let ME = { username: '', role: '' };
@@ -176,6 +177,87 @@ async function logout() {
   TOKEN = '';
   localStorage.removeItem('gp_token');
   showLogin();
+}
+
+/* ---------------- 通知中心 ---------------- */
+
+let notifyTimer = null;
+const KIND_META = {
+  instance: ['⚠️', 'var(--red)'],
+  task: ['⏰', 'var(--amber)'],
+  mesh: ['🌐', 'var(--violet)']
+};
+
+function startNotifyPolling() {
+  if (notifyTimer) clearInterval(notifyTimer);
+  refreshBell();
+  notifyTimer = setInterval(refreshBell, 30000);
+}
+
+async function refreshBell() {
+  const r = await api('/notifications').catch(() => null);
+  if (!r || r.code !== 0) return;
+  const dot = $('#bell-dot');
+  if (!dot) return;
+  dot.classList.toggle('hidden', !(r.data.unread > 0));
+  dot.textContent = r.data.unread > 99 ? '99+' : r.data.unread;
+}
+
+function toggleNotifyPanel() {
+  const existing = $('#notify-panel');
+  if (existing) { existing.remove(); return; }
+  const panel = document.createElement('div');
+  panel.id = 'notify-panel';
+  panel.className = 'notify-panel';
+  panel.innerHTML = '<div class="empty-tip" style="padding:20px">加载中…</div>';
+  document.body.appendChild(panel);
+  loadNotifyPanel();
+}
+
+async function loadNotifyPanel() {
+  const panel = $('#notify-panel');
+  if (!panel) return;
+  const r = await api('/notifications');
+  if (r.code !== 0) { panel.innerHTML = `<div class="empty-tip">${esc(r.msg)}</div>`; return; }
+  const items = r.data.items || [];
+  const [markReadBtn, clearBtn] = [items.some(i => !i.read), items.length > 0];
+  panel.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <b>🔔 通知${r.data.unread ? `（${r.data.unread} 未读）` : ''}</b>
+      <span style="display:flex;gap:6px">
+        ${markReadBtn ? '<button class="btn small" onclick="notifyReadAll()">全部已读</button>' : ''}
+        ${clearBtn ? '<button class="btn small danger" onclick="notifyClear()">清空</button>' : ''}
+        <button class="btn small ghost" onclick="toggleNotifyPanel()">✕</button>
+      </span>
+    </div>
+    <div style="max-height:380px;overflow-y:auto">
+      ${items.length ? items.map(n => {
+        const [ico, color] = KIND_META[n.kind] || ['📌', 'var(--muted)'];
+        return `
+        <div class="notify-item ${n.read ? '' : 'unread'}">
+          <span style="font-size:17px;flex-shrink:0">${ico}</span>
+          <div style="flex:1;min-width:0">
+            <div style="display:flex;justify-content:space-between;gap:8px">
+              <b style="font-size:13px;color:${color}">${esc(n.title)}</b>
+              <span class="muted" style="font-size:11px;white-space:nowrap">${esc(n.time)}</span>
+            </div>
+            <div class="muted" style="font-size:12px;margin-top:2px">${esc(n.body)}</div>
+          </div>
+        </div>`;
+      }).join('') : '<div class="empty-tip" style="padding:26px">🎉 没有通知</div>'}
+    </div>`;
+}
+
+async function notifyReadAll() {
+  await api('/notifications/read-all', { method: 'POST' });
+  loadNotifyPanel();
+  refreshBell();
+}
+
+async function notifyClear() {
+  await api('/notifications/clear', { method: 'POST' });
+  loadNotifyPanel();
+  refreshBell();
 }
 
 /* ---------------- 修改密码 ---------------- */

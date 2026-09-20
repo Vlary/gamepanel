@@ -600,8 +600,13 @@ public class EasyTier {
         etMutex.unlock()
         if (!notifyEvents.isEmpty()) {
             println("[easytier] 节点变动 ${notifyEvents.size} 条")
-            if (HttpUtil.boolean(o, "peerNotify", false)) {
-                for (e in notifyEvents) {
+            for (e in notifyEvents) {
+                // 站内通知始终记录（上下线各一条）；webhook 仅在开关开启时推送
+                let isJoin = Jsons.text(e.get("event") ?? JsonString("")) == "peer_join"
+                let host = Jsons.text(e.get("hostname") ?? JsonString(""))
+                let ip = Jsons.text(e.get("ipv4") ?? JsonString(""))
+                Notifications.push("mesh", if (isJoin) { "玩家上线：${host}" } else { "节点离线：${host}" }, "虚拟 IP ${ip}")
+                if (HttpUtil.boolean(o, "peerNotify", false)) {
                     Monitor.sendWebhook(e)
                 }
             }

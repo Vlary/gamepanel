@@ -198,6 +198,7 @@ public class Monitor {
                 if (now - act > 90) {
                     // 排除刚发生的用户操作 -> 判定为意外退出
                     println("[monitor] 实例 ${ins.name}(${ins.id}) 意外退出（${st}）")
+                    Notifications.push("instance", "实例意外退出：${ins.name}", "游戏 ${ins.game}，容器状态 ${st}，请检查日志")
                     notify(ins, st)
                 }
             }
