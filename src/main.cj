@@ -44,6 +44,12 @@ func registerRoutes(): Unit {
         let body = HttpUtil.bodyJson(ctx)
         let user = HttpUtil.str(body, "username", "")
         let pass = HttpUtil.str(body, "password", "")
+        // 限速优先：锁定期间直接拒绝并告知剩余时间
+        let lock = Auth.lockRemaining(user)
+        if (lock > 0) {
+            HttpUtil.fail(ctx, 1002, "失败次数过多已锁定，请 ${lock / 60 + 1} 分钟后再试")
+            return
+        }
         match (Auth.login(user, pass)) {
             case Some((token, s)) =>
                 HttpUtil.ok(ctx, Jsons.obj([
@@ -53,6 +59,64 @@ func registerRoutes(): Unit {
                 ]))
             case None =>
                 HttpUtil.fail(ctx, 1001, "用户名或密码错误")
+        }
+    })
+
+    /* 修改自己的密码（所有角色，需旧密码验证） */
+    router.post("/api/v1/auth/change-password", { ctx, _ =>
+        if (!Auth.guard(ctx)) {
+            return
+        }
+        let body = HttpUtil.bodyJson(ctx)
+        let old = HttpUtil.str(body, "oldPassword", "")
+        let np = HttpUtil.str(body, "newPassword", "")
+        if (old == "" || np == "") {
+            HttpUtil.fail(ctx, 1003, "旧密码与新密码不能为空")
+            return
+        }
+        if (np.size < 8) {
+            HttpUtil.fail(ctx, 1004, "新密码至少 8 位")
+            return
+        }
+        match (Auth.current(ctx)) {
+            case Some(s) =>
+                match (Users.verify(s.username, old)) {
+                    case Some(_) =>
+                        match (Users.upsert(s.username, np, s.role)) {
+                            case None =>
+                                Users.audit(s.username, "修改了自己的密码")
+                                HttpUtil.okMsg(ctx, "密码已修改")
+                            case Some(e) => HttpUtil.fail(ctx, 1005, e)
+                        }
+                    case None => HttpUtil.fail(ctx, 1001, "旧密码不正确")
+                }
+            case None => HttpUtil.fail(ctx, 1001, "会话失效")
+        }
+    })
+
+    /* 会话管理（admin）：在线会话列表 + 踢出 */
+    router.get("/api/v1/sessions", { ctx, _ =>
+        if (!Auth.guard(ctx) || !Auth.allowAdmin(ctx)) {
+            return
+        }
+        let h = ctx.request.headers.getFirst("Authorization") ?? ""
+        let selfToken = if (h.startsWith("Bearer ")) { h[7..h.size] } else { "" }
+        HttpUtil.ok(ctx, Auth.sessionsJson(selfToken))
+    })
+
+    router.delete("/api/v1/sessions/{prefix}", { ctx, md =>
+        if (!Auth.guard(ctx) || !Auth.allowAdmin(ctx)) {
+            return
+        }
+        let prefix = md.matchString("prefix")
+        match (Auth.current(ctx)) {
+            case Some(s) => Users.audit(s.username, "踢出会话 ${prefix}")
+            case None => ()
+        }
+        if (Auth.kickSession(prefix)) {
+            HttpUtil.okMsg(ctx, "会话已踢出")
+        } else {
+            HttpUtil.fail(ctx, 404, "会话不存在或已过期")
         }
     })
 

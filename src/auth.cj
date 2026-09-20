@@ -33,13 +33,45 @@ public class Auth {
     /* ---------------- 登录与令牌 ---------------- */
 
     /* 登录成功返回 (token, 会话)，失败返回 None */
+    /* 登录失败限速：用户名维度，5 次失败锁 15 分钟（防暴力破解） */
+    private static let loginFails = HashMap<String, (Int64, Int64)>()   // name -> (次数, 锁定到)
+    private static let MAX_FAILS: Int64 = 5
+    private static let LOCK_SECS: Int64 = 900
+
+    /* 返回锁定剩余秒数；0 = 未锁定 */
+    public static func lockRemaining(name0: String): Int64 {
+        var name = name0
+        if (name == "") {
+            name = "admin"
+        }
+        mutex.lock()
+        let f = loginFails.get(name)
+        mutex.unlock()
+        match (f) {
+            case Some((_, until)) =>
+                let now = nowSec()
+                if (until > now) {
+                    return until - now
+                }
+            case None => ()
+        }
+        return 0
+    }
+
     public static func login(username: String, password: String): ?(String, Session) {
         var name = username
         if (name == "") {
             name = "admin"   // 兼容习惯：不填用户名默认 admin
         }
+        let lock = lockRemaining(name)
+        if (lock > 0) {
+            return None
+        }
         match (Users.verify(name, password)) {
             case Some(u) =>
+                mutex.lock()
+                loginFails.remove(name)
+                mutex.unlock()
                 let token = randomToken()
                 let s = Session()
                 s.username = u.username
@@ -51,7 +83,53 @@ public class Auth {
                 saveTokens()
                 Users.audit(u.username, "登录")
                 return Some((token, s))
-            case None => return None
+            case None =>
+                mutex.lock()
+                let (cnt, _) = loginFails.get(name) ?? (0, 0)
+                let cnt2 = cnt + 1
+                if (cnt2 >= MAX_FAILS) {
+                    loginFails.add(name, (0, nowSec() + LOCK_SECS))
+                } else {
+                    loginFails.add(name, (cnt2, 0))
+                }
+                mutex.unlock()
+                return None
+        }
+    }
+
+    /* 会话列表（admin）：token 打码，只留前 8 位用于标识与踢出 */
+    public static func sessionsJson(selfToken: String): JsonArray {
+        let arr = JsonArray()
+        mutex.lock()
+        for ((token, s) in tokens) {
+            arr.add(Jsons.obj([
+                ("tokenPrefix", JsonString(token[..8])),
+                ("username", JsonString(s.username)),
+                ("role", JsonString(s.role)),
+                ("expire", JsonInt(s.expire)),
+                ("current", JsonBool(token == selfToken))
+            ]))
+        }
+        mutex.unlock()
+        return arr
+    }
+
+    /* 踢出会话（按前 8 位匹配，避免全 token 暴露在 URL/日志中） */
+    public static func kickSession(prefix: String): Bool {
+        mutex.lock()
+        var hit: ?String = None
+        for ((token, _) in tokens) {
+            if (token[..8] == prefix) {
+                hit = Some(token)
+                break
+            }
+        }
+        mutex.unlock()
+        match (hit) {
+            case Some(t) =>
+                logout(t)
+                return true
+            case None => return false
         }
     }
 

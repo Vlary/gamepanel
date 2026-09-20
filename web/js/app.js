@@ -178,6 +178,32 @@ async function logout() {
   showLogin();
 }
 
+/* ---------------- 修改密码 ---------------- */
+
+function showChangePass() {
+  if (!ME.username) { toast('请先登录', 'err'); return; }
+  modal('修改密码（' + esc(ME.username) + '）', `
+    <div class="form-row"><label>旧密码</label><input class="inp" id="cp-old" type="password" autocomplete="current-password"></div>
+    <div class="form-row"><label>新密码（至少 8 位）</label><input class="inp" id="cp-new" type="password" autocomplete="new-password"></div>
+    <div class="form-row"><label>确认新密码</label><input class="inp" id="cp-new2" type="password" autocomplete="new-password"></div>
+    <div class="kv-note" style="margin-top:0">改密不影响当前会话；其他已登录设备仍可用旧会话直到过期（管理员可在用户页踢出）。</div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal()">取消</button>
+      <button class="btn primary" onclick="doChangePass()">确认修改</button>
+    </div>`);
+  $('#cp-old').focus();
+}
+
+async function doChangePass() {
+  const old = $('#cp-old').value, np = $('#cp-new').value, np2 = $('#cp-new2').value;
+  if (!old || !np) { toast('请填写完整', 'err'); return; }
+  if (np !== np2) { toast('两次输入的新密码不一致', 'err'); return; }
+  if (np.length < 8) { toast('新密码至少 8 位', 'err'); return; }
+  const r = await api('/auth/change-password', { method: 'POST', body: { oldPassword: old, newPassword: np } });
+  toast(r.msg, r.code === 0 ? 'ok' : 'err');
+  if (r.code === 0) closeModal();
+}
+
 /* ---------------- 顶部统计 ---------------- */
 
 async function refreshTop() {
@@ -189,6 +215,9 @@ async function refreshTop() {
   if (chip) {
     const roleLabel = { admin: '管理员', operator: '运维', viewer: '访客' }[ME.role] || ME.role;
     chip.innerHTML = `<span>${esc(ME.username || '?')}</span><span class="badge badge-info" style="font-size:11px;padding:1px 8px">${esc(roleLabel)}</span>`;
+    chip.title = '点击修改密码';
+    chip.style.cursor = 'pointer';
+    chip.onclick = showChangePass;
     chip.classList.remove('hidden');
   }
   const badge = $('#docker-badge');
@@ -358,12 +387,25 @@ async function instAction(id, action, el) {
 }
 
 function delInstance(id, name) {
-  confirmModal(`删除实例「${name}」`, '将删除容器、全部数据文件与备份快照，不可恢复。确定删除？', async () => {
-    const r = await api(`/instances/${id}/delete`, { method: 'POST' });
-    toast(r.msg, r.code === 0 ? 'ok' : 'err');
-    closeModal();
-    setTimeout(() => switchView(fromView), 500);
-  });
+  // 高危操作：输入实例名确认（防手滑）
+  modal(`删除实例「${esc(name)}」`, `
+    <p>将删除容器、<b>全部数据文件与备份快照</b>，不可恢复。</p>
+    <p class="muted">请输入实例名 <b class="mono">${esc(name)}</b> 以确认：</p>
+    <input class="inp mono" id="del-confirm-name" placeholder="输入实例名">
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal()">取消</button>
+      <button class="btn danger" id="del-confirm-btn" disabled onclick="doDelInstance('${id}', '${name.replace(/'/g, "\\'")}')">确认删除</button>
+    </div>`);
+  const input = $('#del-confirm-name');
+  input.oninput = () => { $('#del-confirm-btn').disabled = input.value.trim() !== name; };
+  input.focus();
+}
+
+async function doDelInstance(id, name) {
+  const r = await api(`/instances/${id}/delete`, { method: 'POST' });
+  toast(r.msg, r.code === 0 ? 'ok' : 'err');
+  closeModal();
+  setTimeout(() => switchView(fromView), 500);
 }
 
 /* ---------------- 实例详情 ---------------- */
@@ -2284,8 +2326,36 @@ async function renderUsers() {
     <div class="card muted" style="font-size:13px">
       <b>角色说明</b>：viewer 可浏览全部页面但不能操作；operator 可启停实例/改配置/备份恢复/装 Mod/管理计划任务；admin 另有删除实例、导入容器、用户管理权限。
     </div>
+    <div class="card" id="sessions-card"></div>
     <div class="card" id="nodes-card"></div>`;
+  renderSessions();
   renderNodes();
+}
+
+async function renderSessions() {
+  const box = $('#sessions-card');
+  if (!box) return;
+  const r = await api('/sessions').catch(() => null);
+  if (!r || r.code !== 0) { box.remove(); return; }
+  const list = r.data || [];
+  const now = Math.floor(Date.now() / 1000);
+  const rows = list.map(x => `
+    <tr>
+      <td class="mono">${esc(x.tokenPrefix)}…</td>
+      <td><b>${esc(x.username)}</b>${x.current ? ' <span class="badge badge-info">当前</span>' : ''}</td>
+      <td>${ROLE_TEXT[x.role] || x.role}</td>
+      <td class="muted">${x.expire > now ? Math.floor((x.expire - now) / 3600) + ' 小时后过期' : '已过期'}</td>
+      <td>${x.current ? '<span class="muted">—</span>' : `<button class="btn small danger" onclick="kickSession('${esc(x.tokenPrefix)}')">踢出</button>`}</td>
+    </tr>`).join('');
+  box.innerHTML = `
+    <h3>🔑 在线会话（${list.length}）</h3>
+    ${list.length ? `<table class="tbl"><tr><th>会话</th><th>用户</th><th>角色</th><th>有效期</th><th>操作</th></tr>${rows}</table>` : '<div class="empty-tip">无在线会话</div>'}`;
+}
+
+async function kickSession(prefix) {
+  const r = await api(`/sessions/${prefix}`, { method: 'DELETE' });
+  toast(r.msg, r.code === 0 ? 'ok' : 'err');
+  renderSessions();
 }
 
 async function renderNodes() {
