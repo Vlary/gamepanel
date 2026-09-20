@@ -1993,41 +1993,98 @@ async function downloadRec(rid) {
 
 /* ----- 玩家管理（Minecraft） ----- */
 
+let PLAYERS_DATA = null;
+let playerFilter = '';
+
 async function renderPlayers() {
   const box = $('#tab-body');
-  box.innerHTML = '<div class="card"><div class="empty-tip">加载中…</div></div>';
+  box.innerHTML = skeletonRows(3);
   const r = await api(`/instances/${CUR.id}/players`);
   if (r.code !== 0) {
     box.innerHTML = `<div class="card"><div class="empty-tip">${esc(r.msg || '暂不支持')}</div></div>`;
     return;
   }
-  const d = r.data;
+  PLAYERS_DATA = r.data;
+  drawPlayers();
+}
+
+function drawPlayers() {
+  const d = PLAYERS_DATA;
+  if (!d) return;
+  const q = playerFilter.trim().toLowerCase();
+  const match = n => !q || n.toLowerCase().includes(q);
   const row = (p, extra) => `
     <div class="file-row">
-      <span class="fname">👤 <b>${esc(p.name)}</b> <span class="muted mono" style="font-size:11px">${esc(p.uuid).slice(0, 18)}…</span></span>
+      <span class="fname">👤 <b>${esc(p.name)}</b> <span class="muted mono" style="font-size:11px">${esc(p.uuid || '').slice(0, 18)}${p.uuid ? '…' : ''}</span></span>
       <span class="file-ops">${extra}</span>
     </div>`;
-  const listCard = (title, list, actions) => `
+  const listCard = (title, list, actions) => {
+    const shown = list.filter(p => match(p.name));
+    return `
     <div class="card">
-      <h3>${title}（${list.length}）</h3>
-      ${list.map(p => row(p, actions(p.name))).join('') || '<div class="empty-tip">空</div>'}
+      <h3>${title}（${shown.length}${q && shown.length !== list.length ? '/' + list.length : ''}）</h3>
+      ${shown.map(p => row(p, actions(p.name))).join('') || `<div class="empty-tip">${q ? '无匹配' : '空'}</div>`}
     </div>`;
-  box.innerHTML = `
+  };
+  $('#tab-body').innerHTML = `
+    <div class="grid cols-4 mb">
+      <div class="card lift"><div class="stat-num">${d.online.length}</div><div class="stat-label">🟢 在线</div></div>
+      <div class="card lift"><div class="stat-num">${d.whitelist.length}</div><div class="stat-label">📋 白名单</div></div>
+      <div class="card lift"><div class="stat-num">${d.ops.length}</div><div class="stat-label">⭐ OP</div></div>
+      <div class="card lift"><div class="stat-num">${d.banned.length}</div><div class="stat-label">🚫 封禁</div></div>
+    </div>
     <div class="card">
-      <h3>🟢 在线玩家（${d.online.length}）</h3>
-      ${d.online.map(n => row({ name: n, uuid: '' }, `<button class="btn small" onclick="playerAction('kick','${esc(n)}')">踢出</button>`)).join('') || '<div class="empty-tip">无人在线</div>'}
+      <h3>🟢 在线玩家</h3>
+      ${d.online.filter(match).map(n => row({ name: n, uuid: '' }, `<button class="btn small" onclick="playerAction('kick','${esc(n)}')">踢出</button>`)).join('') || `<div class="empty-tip">${q ? '无匹配' : '无人在线'}</div>`}
       <div class="form-inline mt">
         <input class="inp" id="pl-name" placeholder="玩家名（添加白名单/OP/封禁）">
         <button class="btn" onclick="playerAction('whitelist-add')">加白名单</button>
         <button class="btn" onclick="playerAction('op')">设 OP</button>
         <button class="btn danger" onclick="playerAction('ban')">封禁</button>
       </div>
+      <div class="form-inline mt">
+        <input class="inp" id="pl-broadcast" placeholder="📢 广播消息（发送给全服玩家）" onkeydown="if(event.key==='Enter')broadcastMsg()">
+        <button class="btn primary" style="flex:0 0 auto" onclick="broadcastMsg()">广播</button>
+      </div>
+      <div class="form-inline mt">
+        <textarea class="inp mono" id="pl-batch" rows="2" placeholder="👥 批量加白（每行一个玩家名，或逗号分隔）"></textarea>
+        <button class="btn" style="flex:0 0 auto" onclick="batchWhitelist()">批量加白</button>
+      </div>
+    </div>
+    <div class="mb" style="display:flex;gap:8px;align-items:center">
+      <input class="inp" placeholder="🔍 搜索玩家（过滤下方所有列表）…" value="${esc(playerFilter)}" oninput="playerFilter=this.value;drawPlayers()" style="max-width:320px">
     </div>
     <div class="grid cols-2">
       ${listCard('📋 白名单', d.whitelist, n => `<button class="btn small danger" onclick="playerAction('whitelist-remove','${esc(n)}')">移除</button>`)}
       ${listCard('⭐ 管理员 OP', d.ops, n => `<button class="btn small" onclick="playerAction('deop','${esc(n)}')">撤销</button>`)}
     </div>
     ${listCard('🚫 封禁列表', d.banned, n => `<button class="btn small" onclick="playerAction('pardon','${esc(n)}')">解封</button>`)}`;
+}
+
+/* 广播：say 命令 UI 化（MC 全服消息） */
+async function broadcastMsg() {
+  const input = $('#pl-broadcast');
+  const msg = input.value.trim();
+  if (!msg) { toast('请输入广播内容', 'err'); return; }
+  // 走 RCON 命令通道：say = MC 全服广播
+  const c = await api(`/instances/${CUR.id}/command`, { method: 'POST', body: { cmd: `say ${msg}` } });
+  if (c.code === 0) { toast('📢 已广播', 'ok'); input.value = ''; }
+  else { toast(c.msg, 'err'); }
+}
+
+/* 批量加白：逗号/换行分隔逐个执行 */
+async function batchWhitelist() {
+  const input = $('#pl-batch');
+  const names = input.value.split(/[,,\n]/).map(x => x.trim()).filter(Boolean);
+  if (!names.length) { toast('请输入玩家名（逗号或换行分隔）', 'err'); return; }
+  let ok = 0, fail = 0;
+  for (const n of names) {
+    const r = await api(`/instances/${CUR.id}/players/whitelist-add`, { method: 'POST', body: { player: n } });
+    r.code === 0 ? ok++ : fail++;
+  }
+  toast(`批量加白完成：成功 ${ok}${fail ? '，失败 ' + fail : ''}`, fail ? 'err' : 'ok');
+  input.value = '';
+  setTimeout(renderPlayers, 600);
 }
 
 async function playerAction(action, name) {
