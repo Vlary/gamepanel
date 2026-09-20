@@ -170,6 +170,10 @@ public class EasyTier {
         return arr
     }
 
+    public static func parseTableForTest(text: String, fieldNames: Array<String>): JsonArray {
+        return parseTable(text, fieldNames)
+    }
+
     public static func statusJson(): JsonObject {
         let o = loadConfig()
         let enabled = HttpUtil.boolean(o, "enabled", false)

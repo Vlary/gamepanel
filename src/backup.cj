@@ -59,10 +59,14 @@ public class Backups {
         return DateTime.now().toUnixTimeStamp().toMilliseconds()
     }
 
+    private static var idSeq: Int64 = 0
     public static func genRecId(): String {
+        // 同一毫秒内多次调用时 ms 种子会生成完全相同的 id（连点创建归档即撞车覆盖记录）；
+        // 加进程内递增序号保证唯一，随机数兜底
+        idSeq += 1
         let ms = nowMs()
-        let r = Random(UInt64(ms))
-        return "r-" + ms.toString() + "-" + r.nextInt64(9000).toString()
+        let r = Random(UInt64(ms) + UInt64(idSeq * 7919))
+        return "r-" + ms.toString() + "-" + idSeq.toString() + "-" + r.nextInt64(9000).toString()
     }
 
     /* 创建备份（全量目录） */

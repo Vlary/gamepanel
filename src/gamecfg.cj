@@ -163,6 +163,10 @@ public class GameConfig {
         return writeProperties(text, key, value)
     }
 
+    public static func writeIniForTest(text: String, path: String, value: String): String {
+        return writeIni(text, path, value)
+    }
+
     /* properties：逐行找 key= 替换；找不到则追加 */
     static func writeProperties(text: String, key: String, value: String): String {
         let lines = text.split("\n")
