@@ -98,6 +98,28 @@
 
 **API 开放** — 面板自身就是 REST API + Bearer Token，可直接脚本化运维（见 `docs/API.md`）
 
+## 功能截图
+
+| 总览（浅色） | 总览（暗色） |
+|---|---|
+| ![总览](docs/screenshots/02-overview-light.png) | ![总览暗色](docs/screenshots/09-overview-dark.png) |
+
+| 实例控制台 | 游戏专属配置（分组） |
+|---|---|
+| ![控制台](docs/screenshots/03-console.png) | ![设置](docs/screenshots/04-settings.png) |
+
+| 备份中心 | 创建向导（三步） |
+|---|---|
+| ![备份](docs/screenshots/05-backup.png) | ![向导](docs/screenshots/06-wizard.png) |
+
+| 计划任务（执行历史） | 系统诊断 |
+|---|---|
+| ![任务](docs/screenshots/07-tasks.png) | ![诊断](docs/screenshots/08-diag.png) |
+
+| 手机端（暗色总览） | 手机端（控制台） |
+|---|---|
+| ![手机](docs/screenshots/10-mobile-dark.png) | ![手机控制台](docs/screenshots/11-mobile-console.png) |
+
 ## 快速开始
 
 ### 1. 环境准备
