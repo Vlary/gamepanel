@@ -332,6 +332,10 @@ async function doChangePass() {
   if (r.code === 0) closeModal();
 }
 
+function roleLabelFor(role) {
+  return { admin: '管理员', operator: '运维', viewer: '访客' }[role] || role || '';
+}
+
 /* ---------------- 顶部统计 ---------------- */
 
 async function refreshTop() {
@@ -348,6 +352,10 @@ async function refreshTop() {
     chip.onclick = showChangePass;
     chip.classList.remove('hidden');
   }
+  // 手机端 chip 被 CSS 隐藏，退出按钮 title 补用户名信息（长按可见）
+  const logoutBtn = $('#logout-btn');
+  if (logoutBtn) logoutBtn.title = `${ME.username || ''}（${roleLabelFor(ME.role)}）· 点击退出`;
+
   const badge = $('#docker-badge');
   badge.textContent = d.dockerOk ? 'Docker 正常' : 'Docker 不可用';
   badge.className = 'badge' + (d.dockerOk ? '' : ' bad');
