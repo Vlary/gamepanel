@@ -380,3 +380,4 @@ input.inp:focus, select.inp:focus, textarea.inp:focus { border-color: var(--prim
 .notify-item:hover { background: var(--card-hover); }
 .notify-item.unread { background: var(--primary-soft); }
 .notify-item.unread:hover { background: var(--primary-soft); }
+.console-box .c-err { color: var(--red); }

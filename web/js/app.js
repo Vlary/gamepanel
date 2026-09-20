@@ -653,6 +653,7 @@ function renderTabBody() {
         <div class="console-toolbar">
           <input class="inp" id="console-filter" placeholder="🔍 过滤日志（关键字高亮）…" oninput="consoleFilterInput(this.value)" style="flex:1">
           <span class="muted mono" id="console-count" style="font-size:12px;white-space:nowrap">0 行</span>
+          <button class="btn small" id="console-err-count" onclick="consoleToggleErrOnly(this)" title="仅显示错误级别日志">⚠ 0</button>
           <button class="btn small" onclick="consoleExport()" title="导出当前日志（含过滤）">⬇ 导出</button>
           <button class="btn small ghost" onclick="editQuickCmds()" title="自定义快捷命令">⚙ 快捷命令</button>
         </div>
@@ -722,15 +723,35 @@ function hlLine(line, q) {
 /* ANSI 颜色转义序列剥离（终端日志常见，留着会显示成乱码字面量） */
 function stripAnsi(l) { return l.replace(/\x1b\[[0-9;]*m/g, ''); }
 
+/* 错误行识别：服务端日志常见错误级别字样 */
+function isErrLine(l) {
+  return /\b(ERROR|SEVERE|FATAL|Exception|FAILED|Fatal)\b/i.test(l);
+}
+
+let consoleErrOnly = false;
+
+function consoleToggleErrOnly(btn) {
+  consoleErrOnly = !consoleErrOnly;
+  btn.classList.toggle('primary', consoleErrOnly);
+  renderConsole(false);
+}
+
 function renderConsole(scrollBottom) {
   const box = $('#console-out');
   if (!box) return;
   const q = consoleFilter.trim();
-  const cleaned = consoleBuf.map(stripAnsi);
+  var cleaned = consoleBuf.map(stripAnsi);
+  const errCount = cleaned.filter(isErrLine).length;
+  if (consoleErrOnly) {
+    cleaned = cleaned.filter(isErrLine);
+  }
   const lines = q ? cleaned.filter(l => l.toLowerCase().includes(q.toLowerCase())) : cleaned;
   // 保留滚动位置：过滤/新行到达时若非自动滚动模式不跳动
   const keepTop = box.scrollTop;
-  box.innerHTML = lines.map(l => '<span class="c-line">' + (l ? hlLine(l, q) : '&nbsp;') + '</span>').join('\n');
+  box.innerHTML = lines.map(l => {
+    const cls = isErrLine(l) ? 'c-line c-err' : 'c-line';
+    return '<span class="' + cls + '">' + (l ? hlLine(l, q) : '&nbsp;') + '</span>';
+  }).join('\n');
   if (scrollBottom || consoleAutoScroll) {
     box.scrollTop = box.scrollHeight;
   } else {
@@ -742,7 +763,12 @@ function renderConsole(scrollBottom) {
     fb.textContent = consoleNewCount > 0 ? `↓ ${consoleNewCount} 行新日志` : '↓ 回到底部';
   }
   const cnt = $('#console-count');
-  if (cnt) cnt.textContent = q ? `${lines.length}/${consoleBuf.length} 行` : `${consoleBuf.length} 行`;
+  if (cnt) cnt.textContent = q ? `${lines.length}/${consoleBuf.length} 行` : `${lines.length} 行`;
+  const eb = $('#console-err-count');
+  if (eb) {
+    eb.textContent = errCount > 0 ? `⚠ ${errCount}` : '⚠ 0';
+    eb.className = 'btn small' + (errCount > 0 ? ' danger' : '');
+  }
 }
 
 /* 用户滚动：距底 40px 内恢复自动滚动，之上暂停 */
@@ -2642,7 +2668,65 @@ async function renderDiag() {
         </tr>`).join('')}</table>` : '<div class="empty-tip">暂无实例</div>'}
     </div>`;
   }
-  $('#main').innerHTML = healthCard + storageCard;
+  // 每游戏故障排查知识库（按面板里已有实例的游戏聚合 + 全部四游戏）
+  const gameNames = { minecraft: '⛏ Minecraft', dst: '🔥 饥荒 DST', terraria: '🌳 泰拉瑞亚', zomboid: '🧟 僵尸毁灭工程' };
+  let troubleCard = `
+  <div class="card">
+    <h3>🧭 游戏故障排查</h3>
+    <div class="tabs" id="trouble-tabs">
+      ${Object.keys(gameNames).map((g, i) => `<div class="tab${i === 0 ? ' active' : ''}" onclick="switchTroubleTab('${g}', this)">${gameNames[g]}</div>`).join('')}
+    </div>
+    <table class="tbl" id="trouble-body"><tr><th>症状</th><th>常见原因</th><th>解决</th></tr>${renderTrouble('minecraft')}</table>
+  </div>`;
+  $('#main').innerHTML = healthCard + storageCard + troubleCard;
+}
+
+function switchTroubleTab(game, el) {
+  $$('#trouble-tabs .tab').forEach(t => t.classList.toggle('active', t === el));
+  $('#trouble-body').innerHTML = `<tr><th>症状</th><th>常见原因</th><th>解决</th></tr>${renderTrouble(game)}`;
+}
+
+/* ---------------- 每游戏故障排查知识库 ---------------- */
+
+const GAME_TROUBLE = {
+  minecraft: [
+    ['启动即退出，日志卡在 EULA', '未接受 Minecraft EULA', '面板环境变量 EULA=TRUE（模板已默认）；或数据目录 eula.txt 里 eula=true'],
+    ['日志出现OutOfMemoryError', '内存配额不足', '设置页把内存提到 4096+；整合包建议 6144-8192'],
+    ['玩家连不上但容器运行中', '就绪检测未过 / 端口未放行', '等状态变「已就绪」（首启要下载核心）；宿主防火墙放行 25565'],
+    ['正版客户端提示 Invalid session', '离线服开了正版验证', '游戏配置「安全」组关闭正版验证（同时关闭安全档案）'],
+    ['切版本后模组报错崩服', '模组与新版本不兼容', '切版本前停用不兼容 mod；Forge/Fabric 与 MC 版本需严格对应'],
+    ['日志刷 Can not keep up 警告', 'CPU 或磁盘跟不上', '降低视距/模拟距离；换 SSD；CPU 限核放开']
+  ],
+  dst: [
+    ['地面能进洞穴断连', '洞穴分片未启用或 token 权限', '设置页「分片」确认洞穴启用；集群 token 对地面+洞穴都有效'],
+    ['服务器列表搜不到', '未公网广播', 'cluster.ini 的 [NETWORK] 无需公网也可直连 IP:10999（UDP）；列表需 Klei 令牌+公网'],
+    ['日志 Sim paused 但玩家进不来', '无人暂停与端口无关', '确认防火墙放行 UDP 10999；洞穴 11000 也需放行'],
+    ['启动秒退且日志有 token 字样', '集群令牌缺失/失效', 'extraEnv 重新填 DST_CLUSTER_TOKEN（Klei 账户页重新生成）'],
+    ['Mod 更新后进不去', '客户端/服务端 Mod 不一致', '客户端订阅相同工坊 Mod；服务端删除 mods 里旧版本重启']
+  ],
+  terraria: [
+    ['进服提示输 setup 码', 'TShock 首次初始化', '游戏内 /setup <码> 完成管理员绑定（码在数据目录 setup-code.txt）'],
+    ['容器反复重启', '世界文件异常', '世界文件页切换到备用 .wld；或删除损坏 .wld 让其自动重建'],
+    ['插件没生效', 'ServerPlugins 版本不匹配', 'Mod 页安装与 TShock 版本匹配的 .dll；改完必须重启'],
+    ['玩家卡在连接界面', '端口/世界生成中', '首次启动需生成世界（约 1-2 分钟）；7777 TCP 放行']
+  ],
+  zomboid: [
+    ['内存越吃越多后崩', 'PZ 内存泄漏常态', '设置页给足 6144+；计划任务每日凌晨重启实例'],
+    ['SteamCMD 更新失败循环', 'Steam 网络抽风', '重启实例让 LGSM 重试；持续失败检查磁盘空间'],
+    ['玩家看不到服务器', '未公网/好友可见未开', '游戏配置开「公网列表」（需公网 IP）；或直连 IP:16261'],
+    ['改了沙盒难度没变化', '旧存档不追溯', '沙盒预设只对新档生效；换难度需删除旧档重来'],
+    ['控制台没输出', 'stdin 控制台受限', 'PZ 管理走网页管理面板（数据目录里可查地址与密码）']
+  ]
+};
+
+function renderTrouble(game) {
+  const list = GAME_TROUBLE[game] || [];
+  return list.map(([symptom, cause, fix]) => `
+    <tr>
+      <td style="width:32%">${esc(symptom)}</td>
+      <td style="width:24%"><span class="badge badge-warn">${esc(cause)}</span></td>
+      <td class="muted" style="font-size:12px">${esc(fix)}</td>
+    </tr>`).join('');
 }
 
 /* ---------------- 用户管理（admin） ---------------- */
