@@ -117,6 +117,18 @@ public class GameConfig {
             case _ =>
                 text = writeProperties(text, f.path, value)
         }
+        // 父目录可能尚未生成（如 PZ 的 Server/ 在首次安装后才出现），先确保存在
+        let slash = lastIdxOf(abs, "/")
+        if (slash > 0) {
+            let parent = abs[..slash]
+            if (!exists(parent)) {
+                try {
+                    Directory.create(parent, recursive: true)
+                } catch (_: Exception) {
+                    ()
+                }
+            }
+        }
         try {
             File.writeTo(abs, text.toArray())
             return None

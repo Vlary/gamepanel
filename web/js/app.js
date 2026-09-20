@@ -1481,6 +1481,11 @@ async function renderSettings() {
       <h3>🌳 世界文件</h3>
       <div id="tw-body" class="empty-tip">加载中…</div>
     </div>` : ''}
+    ${i.game === 'zomboid' ? `
+    <div class="card">
+      <h3>🧟 沙盒难度预设</h3>
+      <div id="pz-body" class="empty-tip">加载中…</div>
+    </div>` : ''}
     <div class="card">
       <h3>基本设置（保存后自动重建容器，数据不受影响）</h3>
       <div class="form-row"><label>实例名称</label><input class="inp" id="set-name" value="${esc(i.name)}"></div>
@@ -1512,6 +1517,29 @@ async function renderSettings() {
   if (i.game === 'minecraft') loadWorlds();
   if (i.game === 'dst') loadDstShards();
   if (i.game === 'terraria') loadTerrariaWorlds();
+  if (i.game === 'zomboid') loadPzPresets();
+}
+
+/* ----- 僵尸毁灭工程沙盒预设 ----- */
+async function loadPzPresets() {
+  const box = $('#pz-body');
+  if (!box) return;
+  const r = await api(`/instances/${CUR.id}/pz-presets`);
+  if (!box) return;
+  if (r.code !== 0) { box.textContent = r.msg; return; }
+  const list = r.data || [];
+  box.innerHTML = `
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      ${list.map(p => `<button class="btn" onclick="pzApply('${esc(p.key)}', this)">${esc(p.name)}</button>`).join('')}
+    </div>
+    <div class="muted" style="font-size:12px;margin-top:10px">写入 servertest.ini 的 [SandboxVars] 段：重启后<b>新开存档</b>生效；已有存档的世界设置不追溯（换难度请删除旧档）。</div>`;
+}
+
+async function pzApply(key, btn) {
+  btn.disabled = true;
+  const r = await api(`/instances/${CUR.id}/pz-presets/${key}/apply`, { method: 'POST' });
+  btn.disabled = false;
+  toast(r.msg, r.code === 0 ? 'ok' : 'err');
 }
 
 /* ----- 泰拉瑞亚世界文件 ----- */

@@ -725,6 +725,100 @@ public func registerTerrariaRoutes(): Unit {
     })
 }
 
+/* ---------------- 僵尸毁灭工程 PZ 沙盒预设 ---------------- */
+
+/* [SandboxVars] 预设模板：键 -> 值（未列出的键保持服务器默认） */
+let PZ_SANDBOX_PRESETS = ArrayList<(String, String, Array<(String, String)>)>()
+
+func initPzPresets(): Unit {
+    if (PZ_SANDBOX_PRESETS.size > 0) {
+        return
+    }
+    PZ_SANDBOX_PRESETS.add(("standard", "官方标准（中等丧尸 · 偶见物资）", [
+        ("ZombieCount", "2"), ("ZombieSpeed", "1"),
+        ("FoodLoot", "3"), ("RangedLoot", "3"), ("MeleeLoot", "3"), ("OtherLoot", "3")
+    ]))
+    PZ_SANDBOX_PRESETS.add(("apocalypse", "末日挑战（疯狂尸潮 · 物资稀缺）", [
+        ("ZombieCount", "4"), ("ZombieSpeed", "2"),
+        ("FoodLoot", "1"), ("RangedLoot", "1"), ("MeleeLoot", "1"), ("OtherLoot", "1")
+    ]))
+    PZ_SANDBOX_PRESETS.add(("builder", "建筑师（无丧尸 · 物资丰富）", [
+        ("ZombieCount", "0"), ("ZombieSpeed", "1"),
+        ("FoodLoot", "4"), ("RangedLoot", "4"), ("MeleeLoot", "4"), ("OtherLoot", "4")
+    ]))
+    PZ_SANDBOX_PRESETS.add(("veteran", "老兵难度（高密度 · 物资常见）", [
+        ("ZombieCount", "3"), ("ZombieSpeed", "1"),
+        ("FoodLoot", "2"), ("RangedLoot", "2"), ("MeleeLoot", "2"), ("OtherLoot", "2")
+    ]))
+}
+
+public func registerPzRoutes(): Unit {
+    router.get("/api/v1/instances/{id}/pz-presets", { ctx, md =>
+        if (!Auth.guard(ctx)) {
+            return
+        }
+        match (Instances.findOr404(ctx, md.matchString("id"))) {
+            case Some(ins) =>
+                if (ins.game != "zomboid") {
+                    HttpUtil.fail(ctx, 4700, "仅僵尸毁灭工程提供沙盒预设")
+                    return
+                }
+                initPzPresets()
+                let arr = JsonArray()
+                for (item in PZ_SANDBOX_PRESETS) {
+                    let (k, name, _) = item
+                    arr.add(Jsons.obj([("key", JsonString(k)), ("name", JsonString(name))]))
+                }
+                HttpUtil.ok(ctx, arr)
+            case None => ()
+        }
+    })
+
+    /* 应用沙盒预设：逐键写入 servertest.ini 的 [SandboxVars] 段（下次开新档生效） */
+    router.post("/api/v1/instances/{id}/pz-presets/{key}/apply", { ctx, md =>
+        if (!Auth.guard(ctx) || !Auth.allowAdmin(ctx)) {
+            return
+        }
+        match (Instances.findOr404(ctx, md.matchString("id"))) {
+            case Some(ins) =>
+                if (ins.game != "zomboid") {
+                    HttpUtil.fail(ctx, 4700, "仅僵尸毁灭工程提供沙盒预设")
+                    return
+                }
+                initPzPresets()
+                let wanted = md.matchString("key")
+                var hit: ?Array<(String, String)> = None
+                var hitName = ""
+                for (item in PZ_SANDBOX_PRESETS) {
+                    let (k, name, vars) = item
+                    if (k == wanted) {
+                        hit = Some(vars)
+                        hitName = name
+                        break
+                    }
+                }
+                match (hit) {
+                    case Some(vars) =>
+                        var done: Int64 = 0
+                        for ((k, v) in vars) {
+                            let f = ConfigField("Server/servertest.ini", "ini", "SandboxVars.${k}", "", "text", [], "", "")
+                            match (GameConfig.writeField(ins, f, v)) {
+                                case Some(e) => HttpUtil.fail(ctx, 4701, "写入 ${k} 失败: ${e}"); return
+                                case None => done += 1
+                            }
+                        }
+                        match (Auth.current(ctx)) {
+                            case Some(u) => Users.audit(u.username, "PZ 沙盒预设 ${hitName} @ ${ins.name}")
+                            case None => ()
+                        }
+                        HttpUtil.okMsg(ctx, "预设「${hitName}」已写入 ${done} 项（重启后新开存档生效；已存在的存档不追溯）")
+                    case None => HttpUtil.fail(ctx, 4702, "未知预设")
+                }
+            case None => ()
+        }
+    })
+}
+
 public func registerDstRoutes(): Unit {
     router.get("/api/v1/instances/{id}/dst-shards", { ctx, md =>
         if (!Auth.guard(ctx)) {

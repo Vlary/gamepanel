@@ -225,18 +225,39 @@ public class Games {
             "afey/zomboid:latest",
             "/server-data",
             ["16261:16261/udp", "16262:16262"],
-            [("TZ", "Asia/Shanghai")],
+            [("TZ", "Asia/Shanghai"), ("LGSM_GAMESERVER", "pzserver"), ("LGSM_GAMESERVER_UPDATE", "true")],
             [
                 GameVersion("latest", "最新正式版 (Build 41)", "afey/zomboid:latest", [])
             ],
             ["Server"],
             "mods",
-            "建议在 extraEnv 设置 ADMIN_PASSWORD（管理面板密码）与 SERVER_NAME；存档在 Server/ 目录",
+            "LGSM 自动安装并更新服务端（首次启动需下载数 GB，耐心等待）；存档与配置在 Server/ 目录，管理员密码在下方游戏配置里设置",
             [
-                ConfigField("Server/servertest.ini", "ini", "servertest.MaxPlayers", "最大玩家数", "number", [], "32", ""),
-                ConfigField("Server/servertest.ini", "ini", "servertest.Password", "进服密码", "text", [], "", "留空为无密码"),
-                ConfigField("Server/servertest.ini", "ini", "servertest.Open", "好友可见", "toggle", [], "false", "true=出现在服务器列表"),
-                ConfigField("Server/servertest.ini", "ini", "servertest.Public", "公网服务器列表", "toggle", [], "false", "true=对全世界公开")
+                // ---- 服务器信息 ----
+                ConfigField("Server/servertest.ini", "ini", "servertest.PublicName", "服务器名称", "text", [], "", "公网列表里显示的名字", "服务器信息"),
+                ConfigField("Server/servertest.ini", "ini", "servertest.PublicDescription", "服务器描述", "text", [], "", "", "服务器信息"),
+                ConfigField("Server/servertest.ini", "ini", "servertest.Password", "进服密码", "text", [], "", "留空为无密码", "服务器信息"),
+                ConfigField("Server/servertest.ini", "ini", "servertest.AdminPassword", "管理员密码", "text", [], "", "游戏内开启管理面板（权限设置）用", "服务器信息"),
+                ConfigField("Server/servertest.ini", "ini", "servertest.MaxPlayers", "最大玩家数", "number", [], "32", "", "服务器信息"),
+                ConfigField("Server/servertest.ini", "ini", "servertest.Open", "好友可见", "toggle", [], "false", "true=出现在 Steam 好友的服务器列表", "服务器信息"),
+                ConfigField("Server/servertest.ini", "ini", "servertest.Public", "公网服务器列表", "toggle", [], "false", "true=对全世界公开（需公网 IP）", "服务器信息"),
+                ConfigField("Server/servertest.ini", "ini", "servertest.AutoCreateUserOnWhiteList", "白名单即注册", "toggle", [], "false", "进服即自动加入白名单（仅密码服适用）", "服务器信息"),
+                // ---- 游戏性 ----
+                ConfigField("Server/servertest.ini", "ini", "servertest.PVP", "允许 PVP", "toggle", [], "false", "", "游戏性"),
+                ConfigField("Server/servertest.ini", "ini", "servertest.PauseEmpty", "无人时暂停", "toggle", [], "true", "省资源且时间不流逝", "游戏性"),
+                ConfigField("Server/servertest.ini", "ini", "servertest.NoDanger", "关闭危险事件", "toggle", [], "false", "直升机/Meta 事件不再触发", "游戏性"),
+                ConfigField("Server/servertest.ini", "ini", "servertest.SafetySystem", "安全屋系统", "toggle", [], "true", "玩家可宣称安全屋，丧尸不破门", "游戏性"),
+                ConfigField("Server/servertest.ini", "ini", "servertest.ShowSafety", "显示安全屋提示", "toggle", [], "true", "", "游戏性"),
+                ConfigField("Server/servertest.ini", "ini", "servertest.SleepAllowed", "允许睡觉跳时", "toggle", [], "false", "单人/好友联机可开，公服慎开", "游戏性"),
+                ConfigField("Server/servertest.ini", "ini", "servertest.SleepNeeded", "睡觉需在床上", "toggle", [], "true", "", "游戏性"),
+                ConfigField("Server/servertest.ini", "ini", "servertest.PlayerSafehouse", "玩家自建安全屋", "toggle", [], "false", "所有玩家均可占领安全屋", "游戏性"),
+                // ---- 存档与维护 ----
+                ConfigField("Server/servertest.ini", "ini", "servertest.SaveWorldEveryMinutes", "世界保存间隔（分钟）", "number", [], "30", "", "存档与维护"),
+                ConfigField("Server/servertest.ini", "ini", "servertest.BackupOnOchestratorClose", "关服时自动备份", "toggle", [], "false", "每次关服前多存一份", "存档与维护"),
+                ConfigField("Server/servertest.ini", "ini", "servertest.DoChecksumScan", "进服文件校验", "toggle", [], "false", "开启后客户端改动文件会被踢，防作弊", "存档与维护"),
+                ConfigField("Server/servertest.ini", "ini", "servertest.AntiCheatProtectionType", "反作弊等级", "select",
+                    [("1", "标准"), ("2", "推荐增强"), ("3", "最严格")], "1", "", "存档与维护"),
+                ConfigField("Server/servertest.ini", "ini", "servertest.MaxAccounts", "账号数上限", "number", [], "0", "0=不限；限制单 IP 注册数", "存档与维护")
             ]
         ))
     }

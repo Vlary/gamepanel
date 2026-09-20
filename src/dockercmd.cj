@@ -163,18 +163,8 @@ public class Docker {
             args.add("${k}=${v}")
         }
         args.add(ins.image)
-        // 僵尸毁灭工程（lacledeslan 镜像）：自定义启动命令；servername 固定 servertest
-        // 与游戏配置 schema（Server/servertest.ini）对齐；ADMIN_PASSWORD 转启动参数
-        if (ins.game == "zomboid") {
-            args.add("/app/start-server.sh")
-            args.add("-servername")
-            args.add("servertest")
-            let adminPass = ins.extraEnv.get("ADMIN_PASSWORD") ?? ""
-            if (adminPass != "") {
-                args.add("-adminpassword")
-                args.add(adminPass)
-            }
-        }
+        // 僵尸毁灭工程（afey/zomboid，LGSM 方案）：entrypoint 自动安装并启动，
+        // 不传 CMD；服务器实例名 pzserver，配置经 /server-data 下的 ini 管理
         // 泰拉瑞亚开箱即玩：数据目录还没有世界文件时附加 -autocreate 2（中等世界），
         // 服务器自动按 WORLD_NAME 生成世界并直接开服（不再停在交互菜单）
         if (ins.game == "terraria" && ins.mountPath != "") {

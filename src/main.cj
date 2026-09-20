@@ -143,6 +143,7 @@ func registerRoutes(): Unit {
     registerWorldRoutes()
     registerDstRoutes()
     registerTerrariaRoutes()
+    registerPzRoutes()
     registerBackupRoutes()
     registerTaskRoutes()
     registerFileRoutes()
