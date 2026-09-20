@@ -1134,6 +1134,99 @@ async function changeVersion() {
 
 /* ---------------- 创建实例向导 ---------------- */
 
+/* ---------------- 创建实例向导（三步式） ---------------- */
+
+let WZ_STEP = 0;
+const MEM_PRESETS = {
+  minecraft: [1024, 2048, 4096, 8192],
+  dst: [4096, 6144, 8192],
+  terraria: [1024, 2048, 4096],
+  zomboid: [4096, 8192, 12288],
+  custom: [1024, 2048, 4096]
+};
+const MEM_HINTS = {
+  minecraft: '原版/轻量 Mod 2G 起步；整合包或 10+ 人建议 4G+',
+  dst: '含洞穴（双进程）建议 4G 起步',
+  terraria: '2G 足够大多数规模',
+  zomboid: '地图大/Mod 多建议 8G+',
+  custom: '按服务端文档评估'
+};
+let portCheckTimer = null;
+let portCheckState = { ok: null, msg: '' };
+
+function wizardGo(n) {
+  WZ_STEP = Math.max(0, Math.min(2, n));
+  $$('.wz-step-page').forEach((el, i) => el.classList.toggle('hidden', i !== WZ_STEP));
+  $$('.steps .step').forEach((el, i) => {
+    el.classList.toggle('cur', i === WZ_STEP);
+    el.classList.toggle('done', i < WZ_STEP);
+  });
+  $('#wz-back').classList.toggle('hidden', WZ_STEP === 0);
+  $('#wz-next').textContent = WZ_STEP === 2 ? '🚀 创建并启动' : '下一步';
+  $('#wz-note').classList.toggle('hidden', WZ_STEP === 0);
+  if (WZ_STEP === 2) buildWzSummary();
+}
+
+function wzNext() {
+  if (WZ_STEP < 2) { wizardGo(WZ_STEP + 1); return; }
+  if (portCheckState.ok === false) {
+    toast('端口不可用：' + portCheckState.msg, 'err');
+    $('#wz-port').focus();
+    return;
+  }
+  createInstance();
+}
+
+/* 第 3 步的确认摘要（选了什么一目了然） */
+function buildWzSummary() {
+  const g = (TPL_CACHE || []).find(x => x.key === (($$('.game-opt.sel')[0] || {}).dataset || {}).g) || {};
+  const loader = ($('#wz-loader') || {}).value || '';
+  const ver = ($('#wz-version') || {}).value || '';
+  const mem = ($('#wz-mem') || {}).value || '';
+  const box = $('#wz-summary');
+  if (!box) return;
+  box.innerHTML = `
+    <table class="tbl">
+      <tr><td style="width:110px;color:var(--muted)">游戏</td><td>${g.icon || ''} ${esc(g.title || '')}</td></tr>
+      <tr><td style="color:var(--muted)">版本</td><td class="mono">${esc(g.key === 'minecraft' ? loader + ' ' + ver : ver)}</td></tr>
+      <tr><td style="color:var(--muted)">资源</td><td>${esc(mem)} MB 内存${Number(($('#wz-cpu') || {}).value) > 0 ? ' · ' + $('#wz-cpu').value + ' 核' : ' · CPU 不限'}</td></tr>
+      <tr><td style="color:var(--muted)">端口</td><td class="mono">${esc(($('#wz-port') || {}).value || (g.ports && g.ports[0] ? g.ports[0].split(':')[0] : '自动'))} <span id="wz-port-badge"></span></td></tr>
+      <tr><td style="color:var(--muted)">节点</td><td>${esc(($('#wz-node') || {}).value || 'local')}</td></tr>
+    </table>`;
+  renderPortBadge();
+}
+
+/* 端口预检：防抖 400ms */
+function wzPortInput(v) {
+  if (portCheckTimer) clearTimeout(portCheckTimer);
+  portCheckState = { ok: null, msg: '' };
+  renderPortBadge();
+  const port = parseInt(v, 10);
+  if (!v || !port) { renderPortBadge(); return; }
+  portCheckTimer = setTimeout(async () => {
+    const r = await api('/port-check?port=' + port).catch(() => null);
+    if (!r || r.code !== 0) return;
+    const d = r.data;
+    if (d.available) portCheckState = { ok: true, msg: '可用' };
+    else if (d.byInstance) portCheckState = { ok: false, msg: '已被实例「' + d.byInstance + '」占用' };
+    else if (d.systemInUse) portCheckState = { ok: false, msg: '被本机其他程序占用' };
+    renderPortBadge();
+  }, 400);
+}
+
+function renderPortBadge() {
+  const b = $('#wz-port-badge');
+  if (!b) return;
+  if (portCheckState.ok === true) b.innerHTML = '<span class="badge badge-ok">✓ 可用</span>';
+  else if (portCheckState.ok === false) b.innerHTML = '<span class="badge bad">✕ ' + esc(portCheckState.msg) + '</span>';
+  else b.innerHTML = '<span class="muted" style="font-size:12px">输入后自动检测</span>';
+}
+
+function memPreset(v, el) {
+  $('#wz-mem').value = v;
+  $$('.mem-chip').forEach(c => c.classList.toggle('primary', c === el));
+}
+
 async function showCreateDialog() {
   if (!TPL_CACHE) {
     const r = await api('/templates');
@@ -1145,12 +1238,15 @@ async function showCreateDialog() {
     toast('游戏模板加载失败，请刷新页面重试', 'err');
     return;
   }
+  portCheckState = { ok: null, msg: '' };
   modal('创建实例', `
-    <div style="margin-bottom:14px;display:flex;justify-content:flex-end">
-      <button class="btn" onclick="showModpackDialog()">📦 从 Modrinth 整合包一键开服</button>
+    <div class="steps">
+      <div class="step cur">① 选择游戏</div>
+      <div class="step">② 版本与资源</div>
+      <div class="step">③ 命名与端口</div>
     </div>
     <div id="wizard">
-      <div class="form-row"><label>① 选择游戏</label>
+      <div class="wz-step-page">
         <div class="game-pick" id="pick-games">
           ${games.map((g, i) => `
             <div class="game-opt ${i === 0 ? 'sel' : ''}" data-g="${g.key}" onclick="pickGame('${g.key}')">
@@ -1159,37 +1255,53 @@ async function showCreateDialog() {
               <div class="g-desc">${esc(g.desc)}</div>
             </div>`).join('')}
         </div>
+        <div class="mt" style="text-align:center">
+          <span class="muted">想直接玩整合包？</span>
+          <button class="btn small" onclick="showModpackDialog()">📦 从 Modrinth 整合包一键开服</button>
+        </div>
       </div>
-      <div class="form-inline">
-        <div class="form-row" style="flex:0 0 130px"><label>② 服务端类型</label>
-          <select class="inp" id="wz-loader" onchange="fillMcVersions()">
-            <option value="paper">Paper</option>
-            <option value="fabric">Fabric</option>
-            <option value="vanilla">原版</option>
-            <option value="forge">Forge</option>
-          </select></div>
-        <div class="form-row"><label>版本</label><select class="inp" id="wz-version"></select></div>
-        <div class="form-row" style="flex:0 0 150px"><label>节点</label><select class="inp" id="wz-node"></select></div>
+      <div class="wz-step-page hidden">
+        <div class="form-inline">
+          <div class="form-row" style="flex:0 0 130px"><label>服务端类型</label>
+            <select class="inp" id="wz-loader" onchange="fillMcVersions()">
+              <option value="paper">Paper</option>
+              <option value="fabric">Fabric</option>
+              <option value="vanilla">原版</option>
+              <option value="forge">Forge</option>
+            </select></div>
+          <div class="form-row"><label>版本</label><select class="inp" id="wz-version"></select></div>
+          <div class="form-row" style="flex:0 0 150px"><label>节点</label><select class="inp" id="wz-node"></select></div>
+        </div>
+        <div class="form-row"><label>内存配额（MB）<span class="muted" id="wz-mem-hint" style="margin-left:8px"></span></label>
+          <div style="display:flex;gap:6px;flex-wrap:wrap" id="wz-mem-chips"></div>
+          <input class="inp mt" id="wz-mem" type="number" value="2048" min="256" step="256" style="width:160px">
+        </div>
+        <div class="form-row" style="width:200px"><label>CPU 核数（0 不限）</label>
+          <input class="inp" id="wz-cpu" type="number" step="0.5" value="0" min="0"></div>
       </div>
-      <div class="form-inline">
-        <div class="form-row"><label>实例名称</label><input class="inp" id="wz-name" placeholder="如：周末生存服"></div>
-        <div class="form-row"><label>宿主端口</label><input class="inp" id="wz-port" placeholder="留空用默认"></div>
+      <div class="wz-step-page hidden">
+        <div class="form-inline">
+          <div class="form-row"><label>实例名称</label><input class="inp" id="wz-name" placeholder="如：周末生存服"></div>
+          <div class="form-row" style="flex:0 0 150px"><label>宿主端口</label>
+            <input class="inp" id="wz-port" placeholder="留空用默认" oninput="wzPortInput(this.value)"></div>
+        </div>
+        <div class="form-inline">
+          <div class="form-row" style="flex:0 0 170px"><label>接入联机组网</label>
+            <select class="inp" id="wz-mesh">
+              <option value="false">不接入</option>
+              <option value="true">🌐 EasyTier（玩家用虚拟IP连接）</option>
+            </select></div>
+        </div>
+        <div class="form-row"><label>自定义环境变量（每行 KEY=VALUE，可空）</label>
+          <textarea class="inp mono" id="wz-env" rows="2" placeholder="如 DST_CLUSTER_TOKEN=xxx"></textarea></div>
+        <h3 class="mt" style="font-size:13px;color:var(--muted)">确认信息</h3>
+        <div id="wz-summary"></div>
       </div>
-      <div class="form-inline">
-        <div class="form-row"><label>内存 (MB)</label><input class="inp" id="wz-mem" type="number" value="2048"></div>
-        <div class="form-row"><label>CPU 核数（0 不限）</label><input class="inp" id="wz-cpu" type="number" step="0.5" value="0"></div>
-        <div class="form-row" style="flex:0 0 170px"><label>接入联机组网</label>
-          <select class="inp" id="wz-mesh">
-            <option value="false">不接入</option>
-            <option value="true">🌐 EasyTier（玩家用虚拟IP连接）</option>
-          </select></div>
-      </div>
-      <div class="form-row"><label>自定义环境变量（每行 KEY=VALUE，可空）</label>
-        <textarea class="inp mono" id="wz-env" rows="3" placeholder="如 DST_CLUSTER_TOKEN=xxx"></textarea></div>
-      <div id="wz-note" class="kv-note"></div>
+      <div id="wz-note" class="kv-note hidden"></div>
       <div class="modal-actions">
         <button class="btn" onclick="closeModal()">取消</button>
-        <button class="btn primary" onclick="createInstance()">创建并启动</button>
+        <button class="btn hidden" id="wz-back" onclick="wizardGo(WZ_STEP - 1)">上一步</button>
+        <button class="btn primary" id="wz-next" onclick="wzNext()">下一步</button>
       </div>
     </div>`);
   api('/nodes').then(nr => {
@@ -1206,6 +1318,18 @@ function pickGame(key) {
   $('#wz-version').innerHTML = g.versions.map(v => `<option value="${v.key}">${esc(v.label)}</option>`).join('');
   $('#wz-port').placeholder = '默认 ' + g.ports[0].split(':')[0];
   $('#wz-note').textContent = g.note ? '📌 ' + g.note : '';
+  // 资源建议：预设档位 chips + 经验提示（游戏选完即更新）
+  const presets = MEM_PRESETS[g.key] || MEM_PRESETS.custom;
+  const chipsBox = $('#wz-mem-chips');
+  if (chipsBox) {
+    chipsBox.innerHTML = presets.map(v =>
+      `<button class="btn small mem-chip${v === 2048 ? ' primary' : ''}" onclick="memPreset(${v}, this)">${v >= 1024 ? (v / 1024) + ' GB' : v + ' MB'}</button>`).join('');
+    const def = presets.includes(2048) ? 2048 : presets[Math.floor(presets.length / 2)];
+    $('#wz-mem').value = def;
+    $$('.mem-chip').forEach(c => c.classList.toggle('primary', c.textContent.includes(def >= 1024 ? (def / 1024) + ' GB' : def + ' MB')));
+  }
+  const hint = $('#wz-mem-hint');
+  if (hint) hint.textContent = MEM_HINTS[g.key] || MEM_HINTS.custom;
   // Minecraft：动态拉取官方最新版本列表（失败保留静态表兜底）
   if (key === 'minecraft') fillMcVersions();
 }

@@ -348,3 +348,25 @@ func testStripMask(): Unit {
     @Assert(EasyTier.stripMask("10.6.6.2") == "10.6.6.2")
     @Assert(EasyTier.stripMask("") == "")
 }
+
+@Test
+func testParseHex(): Unit {
+    @Assert(parseHex("1F90") == 8080)
+    @Assert(parseHex("0062") == 98)
+    @Assert(parseHex("FFFF") == 65535)
+    @Assert(parseHex("") == -1)
+    @Assert(parseHex("12G4") == -1)
+}
+
+@Test
+func testSplitWs(): Unit {
+    let r1 = splitWs("  0: 0100007F:1F90 00000000:0000 0A ")
+    @Assert(r1.size == 4)
+    @Assert(r1[1] == "0100007F:1F90")
+    @Assert(r1[3] == "0A")
+    let r2 = splitWs("a\tb  c")
+    @Assert(r2.size == 3)
+    @Assert(r2[0] == "a" && r2[1] == "b" && r2[2] == "c")
+    @Assert(splitWs("").size == 0)
+    @Assert(splitWs("   ").size == 0)
+}
