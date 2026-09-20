@@ -223,15 +223,31 @@ let instFilter = '';
 
 async function renderOverview() {
   if (overviewTimer) { clearTimeout(overviewTimer); }
-  const r = await api('/instances');
+  const [r, ov] = await Promise.all([api('/instances'), api('/overview').catch(() => ({ code: -1 }))]);
   if (r.code !== 0) return;
   const list = r.data;
   const running = list.filter(i => i.status === 'running').length;
+  // 磁盘与数据目录可视化（overview 聚合）
+  let diskCard = '';
+  if (ov.code === 0) {
+    const d = ov.data;
+    const total = d.diskTotalGB || 0;
+    const avail = d.diskAvailGB || 0;
+    const usedPct = total > 0 ? Math.min(100, (total - avail) / total * 100) : 0;
+    diskCard = `
+      <div class="card lift">
+        <div class="stat-num" style="font-size:20px">${avail.toFixed(1)} <span style="font-size:13px;color:var(--muted)">/ ${total.toFixed(0)} GB 可用</span></div>
+        <div class="stat-label" style="margin-bottom:8px">💾 磁盘（已用 ${usedPct.toFixed(0)}%）</div>
+        <div class="progress"><div style="width:${usedPct}%;background:${usedPct > 85 ? 'var(--red)' : usedPct > 70 ? 'var(--amber)' : 'var(--primary)'}"></div></div>
+        <div class="stat-label" style="margin-top:6px">数据目录 ${fmtSize((d.dataUsedMB || 0) * 1024 * 1024)}</div>
+      </div>`;
+  }
   $('#main').innerHTML = `
     <div class="grid cols-4 mb">
       ${statCard('🎮', list.length, '实例总数')}
       ${statCard('✅', running, '运行中')}
       ${statCard('⏹', list.length - running, '已停止')}
+      ${diskCard}
     </div>
     <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
@@ -1856,17 +1872,31 @@ function renderAbout() {
 
 let metricsTimer = null;
 
+let METRICS_RANGE = 120;   // 显示点数：30=15分 60=30分 120=1小时
+
 async function renderMetrics() {
   if (!CUR) { toast('请先从列表打开实例详情', 'err'); return; }
 
   if (metricsTimer) { clearInterval(metricsTimer); metricsTimer = null; }
   $('#tab-body').innerHTML = `
     <div class="card">
-      <h3>资源监控（最近 1 小时，每 30 秒采样）</h3>
+      <h3 style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+        <span>资源监控（每 30 秒采样）</span>
+        <span style="display:flex;gap:4px">
+          ${[['15 分钟', 30], ['30 分钟', 60], ['1 小时', 120]].map(([label, n]) =>
+            `<button class="btn small${METRICS_RANGE === n ? ' primary' : ''}" onclick="setMetricsRange(${n})">${label}</button>`).join('')}
+        </span>
+      </h3>
       <div id="metrics-box" class="empty-tip">加载中…</div>
     </div>`;
   await drawMetrics();
   metricsTimer = setInterval(drawMetrics, 30000);
+}
+
+function setMetricsRange(n) {
+  METRICS_RANGE = n;
+  if (metricsTimer) { clearInterval(metricsTimer); metricsTimer = null; }
+  renderMetrics();
 }
 
 async function drawMetrics() {
@@ -1876,25 +1906,49 @@ async function drawMetrics() {
   const box = $('#metrics-box');
   if (!box) return;
   if (r.code !== 0) { box.textContent = '加载失败'; return; }
-  const pts = r.data || [];
+  const all = r.data || [];
+  const pts = all.slice(-METRICS_RANGE);
   if (pts.length < 2) { box.textContent = '采样中，请稍候（实例运行时每 30 秒记录一次）'; return; }
-  const W = 860, H = 240, PAD = 36;
+  const W = 860, H = 260, PAD = 46;
   const maxCpu = Math.max(10, ...pts.map(p => p.cpu)) * 1.15;
   const maxMem = Math.max(128, ...pts.map(p => p.memMB)) * 1.15;
   const X = i => PAD + i * (W - PAD * 2) / (pts.length - 1);
   const Y = (v, max) => H - PAD - v / max * (H - PAD * 2);
   const line = (key, max) => pts.map((p, i) => `${i ? 'L' : 'M'}${X(i).toFixed(1)},${Y(p[key], max).toFixed(1)}`).join(' ');
+  const area = (key, max) => `${line(key, max)} L${X(pts.length - 1).toFixed(1)},${H - PAD} L${PAD},${H - PAD} Z`;
   const labels = pts.filter((_, i) => i % Math.ceil(pts.length / 8) === 0);
+  const last = pts[pts.length - 1];
+  const yTicks = (max, unit) => [1, .5, 0].map(f =>
+    `<text x="${PAD - 6}" y="${Y(f * max, max) + 3}" font-size="10" fill="var(--muted)" text-anchor="end">${(max * f).toFixed(0)}${unit}</text>`).join('');
   box.innerHTML = `
     <svg viewBox="0 0 ${W} ${H}" style="width:100%;background:var(--card);border:1px solid var(--line);border-radius:8px">
-      ${[0, .25, .5, .75, 1].map(f => `<line x1="${PAD}" x2="${W - PAD}" y1="${Y(f * maxCpu, maxCpu)}" y2="${Y(f * maxCpu, maxCpu)}" stroke="#eceff4"/>`).join('')}
-      <path d="${line('cpu', maxCpu)}" fill="none" stroke="#2563eb" stroke-width="2"/>
-      <path d="${line('memMB', maxMem)}" fill="none" stroke="#16a34a" stroke-width="2"/>
-      ${labels.map(p => `<text x="${X(pts.indexOf(p))}" y="${H - 10}" font-size="10" fill="#9aa4b2" text-anchor="middle">${p.t}</text>`).join('')}
+      <defs>
+        <linearGradient id="gCpu" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="var(--primary)" stop-opacity=".25"/>
+          <stop offset="100%" stop-color="var(--primary)" stop-opacity="0"/>
+        </linearGradient>
+        <linearGradient id="gMem" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="var(--green)" stop-opacity=".2"/>
+          <stop offset="100%" stop-color="var(--green)" stop-opacity="0"/>
+        </linearGradient>
+      </defs>
+      ${[0, .25, .5, .75, 1].map(f => `<line x1="${PAD}" x2="${W - PAD}" y1="${Y(f * maxCpu, maxCpu)}" y2="${Y(f * maxCpu, maxCpu)}" stroke="var(--line)" stroke-width="1"/>`).join('')}
+      ${yTicks(maxCpu, '%')}
+      ${yTicks(maxMem / 1024 > 1 ? maxMem / 1024 : maxMem, maxMem / 1024 > 1 ? 'G' : 'M')}
+      <path d="${area('cpu', maxCpu)}" fill="url(#gCpu)"/>
+      <path d="${area('memMB', maxMem)}" fill="url(#gMem)"/>
+      <path d="${line('cpu', maxCpu)}" fill="none" stroke="var(--primary)" stroke-width="2"/>
+      <path d="${line('memMB', maxMem)}" fill="none" stroke="var(--green)" stroke-width="2"/>
+      <circle cx="${X(pts.length - 1)}" cy="${Y(last.cpu, maxCpu)}" r="3.5" fill="var(--primary)"/>
+      <circle cx="${X(pts.length - 1)}" cy="${Y(last.memMB, maxMem)}" r="3.5" fill="var(--green)"/>
+      ${labels.map((p, li) => {
+        const i = li * Math.ceil(pts.length / 8);
+        return `<text x="${X(i)}" y="${H - 12}" font-size="10" fill="var(--muted)" text-anchor="middle">${p.t}</text>`;
+      }).join('')}
     </svg>
-    <div style="margin-top:10px;font-size:13px">
-      <span style="color:var(--primary)">━ CPU（峰值 ${(Math.max(...pts.map(p => p.cpu))).toFixed(1)}%，当前 ${pts[pts.length - 1].cpu.toFixed(1)}%）</span>
-      &nbsp;&nbsp;<span style="color:var(--green)">━ 内存（峰值 ${fmtSize(Math.max(...pts.map(p => p.memMB)) * 1024 * 1024)}，当前 ${fmtSize(pts[pts.length - 1].memMB * 1024 * 1024)}）</span>
+    <div style="margin-top:10px;font-size:13px;display:flex;gap:18px;flex-wrap:wrap">
+      <span style="color:var(--primary)">━ CPU（峰值 ${(Math.max(...pts.map(p => p.cpu))).toFixed(1)}%，当前 ${last.cpu.toFixed(1)}%）</span>
+      <span style="color:var(--green)">━ 内存（峰值 ${fmtSize(Math.max(...pts.map(p => p.memMB)) * 1024 * 1024)}，当前 ${fmtSize(last.memMB * 1024 * 1024)}）</span>
     </div>`;
 }
 

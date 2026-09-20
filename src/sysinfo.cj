@@ -37,7 +37,16 @@ func dirSizeKB(path: String): Int64 {
 
 /* 磁盘可用空间：df -B1 输出 Avail 列 */
 func diskAvailBytes(path: String): Int64 {
-    let s = runShell("df", ["-B1", "--output=avail", path])
+    return dfColumn(path, "avail")
+}
+
+/* 磁盘总容量：df -B1 输出 size 列（df 无 total 字段名） */
+func diskTotalBytes(path: String): Int64 {
+    return dfColumn(path, "size")
+}
+
+func dfColumn(path: String, col: String): Int64 {
+    let s = runShell("df", ["-B1", "--output=" + col, path])
     if (s == "") {
         return 0
     }
@@ -89,7 +98,8 @@ public func registerSystemRoutes(): Unit {
             ("runningCount", JsonInt(runningCount)),
             ("dataDir", JsonString(Config.dataRoot)),
             ("dataUsedMB", JsonInt(Monitor.dataUsedKBNow() / 1024)),
-            ("diskAvailGB", JsonFloat(Float64.parse(diskAvailBytes(Config.dataRoot).toString()) / 1073741824.0))
+            ("diskAvailGB", JsonFloat(Float64.parse(diskAvailBytes(Config.dataRoot).toString()) / 1073741824.0)),
+            ("diskTotalGB", JsonFloat(Float64.parse(diskTotalBytes(Config.dataRoot).toString()) / 1073741824.0))
         ]))
     })
 
