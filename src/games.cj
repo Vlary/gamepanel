@@ -101,9 +101,16 @@ public class Games {
             [
                 GameVersion("paper-1.21", "Paper 1.21.1（推荐）", "itzg/minecraft-server:latest", [("TYPE", "PAPER"), ("VERSION", "1.21.1")]),
                 GameVersion("paper-1.20", "Paper 1.20.6", "itzg/minecraft-server:latest", [("TYPE", "PAPER"), ("VERSION", "1.20.6")]),
+                GameVersion("paper-1.19", "Paper 1.19.4（怀旧插件生态）", "itzg/minecraft-server:latest", [("TYPE", "PAPER"), ("VERSION", "1.19.4")]),
+                GameVersion("paper-1.16", "Paper 1.16.5（离线朋克生态）", "itzg/minecraft-server:latest", [("TYPE", "PAPER"), ("VERSION", "1.16.5")]),
+                GameVersion("paper-1.12", "Paper 1.12.2（经典圈地服）", "itzg/minecraft-server:latest", [("TYPE", "PAPER"), ("VERSION", "1.12.2")]),
                 GameVersion("vanilla-1.21", "原版 1.21.1", "itzg/minecraft-server:latest", [("TYPE", "VANILLA"), ("VERSION", "1.21.1")]),
+                GameVersion("vanilla-1.20", "原版 1.20.6", "itzg/minecraft-server:latest", [("TYPE", "VANILLA"), ("VERSION", "1.20.6")]),
+                GameVersion("forge-1.21", "Forge 1.21.1（模组服）", "itzg/minecraft-server:latest", [("TYPE", "FORGE"), ("VERSION", "1.21.1")]),
                 GameVersion("forge-1.20", "Forge 1.20.1（模组服）", "itzg/minecraft-server:latest", [("TYPE", "FORGE"), ("VERSION", "1.20.1")]),
-                GameVersion("fabric-1.21", "Fabric 1.21.1（轻量模组）", "itzg/minecraft-server:latest", [("TYPE", "FABRIC"), ("VERSION", "1.21.1")])
+                GameVersion("fabric-1.21", "Fabric 1.21.1（轻量模组）", "itzg/minecraft-server:latest", [("TYPE", "FABRIC"), ("VERSION", "1.21.1")]),
+                GameVersion("fabric-1.20", "Fabric 1.20.1（轻量模组）", "itzg/minecraft-server:latest", [("TYPE", "FABRIC"), ("VERSION", "1.20.1")]),
+                GameVersion("fabric-1.16", "Fabric 1.16.5（老牌模组生态）", "itzg/minecraft-server:latest", [("TYPE", "FABRIC"), ("VERSION", "1.16.5")])
             ],
             ["world"],
             "mods",

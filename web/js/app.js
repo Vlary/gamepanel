@@ -1757,11 +1757,35 @@ async function saveSettings() {
   if (r.code === 0) { await refreshCur(); renderDetail(); }
 }
 
+/* 版本 key 的加载器前缀（MC）：用于判断切换是否跨越模组生态 */
+function mcLoaderOf(versionKey) {
+  const m = /^(paper|fabric|forge|vanilla|neoforge)-/.exec(versionKey || '');
+  return m ? m[1] : '';
+}
+
 async function changeVersion() {
   if (!CUR) { toast('请先从列表打开实例详情', 'err'); return; }
 
   const version = $('#set-version').value;
-  confirmModal('切换版本', '将停止当前容器并按新版本重建（数据保留）。继续？', async () => {
+  // 模组兼容预警：MC 跨加载器切换（Paper↔Fabric↔Forge）时已有 mod 大概率失效
+  let modWarn = '';
+  if (CUR.game === 'minecraft') {
+    const fromLoader = mcLoaderOf(CUR.version);
+    const toLoader = mcLoaderOf(version);
+    if (fromLoader && toLoader && fromLoader !== toLoader) {
+      const mr = await api(`/instances/${CUR.id}/mods`).catch(() => null);
+      const modCount = (mr && mr.code === 0 && mr.data && mr.data.length) || 0;
+      if (modCount > 0) {
+        modWarn = `<p style="color:var(--red)">⚠️ 从 <b>${fromLoader}</b> 切到 <b>${toLoader}</b>：已安装的 <b>${modCount}</b> 个 Mod 几乎必然失效（不同加载器二进制不兼容），需按新生态重新安装。世界数据中模组方块也可能丢失。</p>`;
+      } else {
+        modWarn = `<p style="color:var(--amber)">⚠️ 跨加载器切换（${fromLoader} → ${toLoader}），确认你要切换的生态。</p>`;
+      }
+    }
+  }
+  confirmModal('切换版本', `
+    <p>将停止当前容器并按 <b class="mono">${esc(version)}</b> 重建（数据目录保留）。</p>
+    ${modWarn}
+    <p class="muted">建议切换前先做一次全量备份。</p>`, async () => {
     const r = await api(`/instances/${CUR.id}/change-version`, { method: 'POST', body: { version } });
     toast(r.msg, r.code === 0 ? 'ok' : 'err');
     closeModal();
