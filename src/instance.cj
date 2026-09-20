@@ -489,6 +489,123 @@ func defaultName(s: String): String {
 }
 
 /* 生命周期动作路由：必须最后注册（{action} 会吞掉同前缀的具体路径） */
+/* ---------------- Minecraft 世界管理 ---------------- */
+
+/*
+ * 多世界识别：数据目录下带 level.dat 的 world* 目录（主世界/下界/末地/多世界插件产物）。
+ * 附带 EULA 状态（eula.txt 的 eula= 行）。
+ */
+func mcWorldsJson(ins: Instance): JsonObject {
+    let worlds = JsonArray()
+    var eula = ""
+    let eulaFile = ins.dataDir + "/eula.txt"
+    if (exists(eulaFile)) {
+        try {
+            for (line in String.fromUtf8(File.readFrom(eulaFile)).split("\n")) {
+                let t = line.trimAscii()
+                if (t.startsWith("eula=")) {
+                    eula = t[5..].trimAscii()
+                }
+            }
+        } catch (_: Exception) {
+            ()
+        }
+    }
+    try {
+        for (de in Directory.readFrom(ins.dataDir)) {
+            let name = de.name
+            // world* 目录且含 session.lock/level.dat 即视为世界（Paper 首次存档前不落 level.dat）
+            if (!name.startsWith("world")) {
+                continue
+            }
+            let dir = ins.dataDir + "/" + name
+            let hasLevel = exists(dir + "/level.dat")
+            if (!hasLevel && !exists(dir + "/session.lock")) {
+                continue
+            }
+            let label = match (name) {
+                case "world" => "主世界（Overworld）"
+                case "world_nether" => "下界（Nether）"
+                case "world_the_end" => "末地（The End）"
+                case _ => name
+            }
+            let sizeKB = dirSizeKB(dir)
+            worlds.add(Jsons.obj([
+                ("name", JsonString(name)),
+                ("label", JsonString(label)),
+                ("sizeMB", JsonInt(sizeKB / 1024)),
+                ("saved", JsonBool(hasLevel)),           // level.dat 已落盘 = 有可恢复存档
+                ("fresh", JsonBool(sizeKB < 64))   // 刚生成的空世界
+            ]))
+        }
+    } catch (_: Exception) {
+        ()
+    }
+    return Jsons.obj([
+        ("worlds", worlds),
+        ("eula", JsonString(eula))   // "" = 文件未生成
+    ])
+}
+
+public func registerWorldRoutes(): Unit {
+    router.get("/api/v1/instances/{id}/worlds", { ctx, md =>
+        if (!Auth.guard(ctx)) {
+            return
+        }
+        match (Instances.findOr404(ctx, md.matchString("id"))) {
+            case Some(ins) =>
+                if (ins.game != "minecraft") {
+                    HttpUtil.fail(ctx, 4400, "仅 Minecraft 提供世界管理")
+                    return
+                }
+                HttpUtil.ok(ctx, mcWorldsJson(ins))
+            case None => ()
+        }
+    })
+
+    /* 单世界重置：要求实例停止；先做全量保护备份，再删除世界目录（服务端下次启动自动重新生成） */
+    router.post("/api/v1/instances/{id}/worlds/{name}/reset", { ctx, md =>
+        if (!Auth.guard(ctx) || !Auth.allowAdmin(ctx)) {
+            return
+        }
+        match (Instances.findOr404(ctx, md.matchString("id"))) {
+            case Some(ins) =>
+                let world = md.matchString("name")
+                // 路径安全：世界名仅允许字母数字下划线
+                if (world == "" || world.contains("/") || world.contains("\\") || world.contains("..")) {
+                    HttpUtil.fail(ctx, 4401, "非法世界名")
+                    return
+                }
+                let dir = ins.dataDir + "/" + world
+                if (!exists(dir + "/level.dat") && !exists(dir + "/session.lock")) {
+                    HttpUtil.fail(ctx, 4402, "世界不存在: ${world}")
+                    return
+                }
+                if (Docker.status(ins.containerName(), node: ins.node) == "running") {
+                    HttpUtil.fail(ctx, 4403, "请先停止实例再重置世界")
+                    return
+                }
+                match (Auth.current(ctx)) {
+                    case Some(u) => Users.audit(u.username, "重置世界 ${world} @ ${ins.name}")
+                    case None => ()
+                }
+                // 保护备份（失败即中止，宁可不删）
+                match (Backups.createBackup(ins, "重置${world}前保护", false)) {
+                    case Some(e) => HttpUtil.fail(ctx, 4404, "保护备份失败，已中止: ${e}")
+                    case None => ()
+                }
+                try {
+                    remove(dir, recursive: true)
+                    Notifications.push("instance", "世界已重置：${ins.name}/${world}", "重置前的全量备份已保留，可在备份页恢复")
+                    HttpUtil.okMsg(ctx, "世界 ${world} 已重置（保护备份已保留），下次启动自动生成新世界")
+                } catch (e: Exception) {
+                    HttpUtil.fail(ctx, 4405, "删除失败: ${e.message}")
+                }
+            case None => ()
+        }
+    })
+}
+
 public func registerLifecycleRoutes(): Unit {
     router.post("/api/v1/instances/{id}/{action}", { ctx, md =>
     if (!Auth.guard(ctx)) {

@@ -140,6 +140,7 @@ func registerRoutes(): Unit {
 
     /* 其余业务路由由各模块注册 */
     registerInstanceRoutes()
+    registerWorldRoutes()
     registerBackupRoutes()
     registerTaskRoutes()
     registerFileRoutes()

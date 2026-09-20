@@ -1466,6 +1466,11 @@ async function renderSettings() {
       <h3>🎮 游戏专属配置</h3>
       <div id="gamecfg-body" class="empty-tip">加载中…</div>
     </div>
+    ${i.game === 'minecraft' ? `
+    <div class="card">
+      <h3>🌍 世界管理 <span id="eula-badge" class="badge"></span></h3>
+      <div id="worlds-body" class="empty-tip">加载中…</div>
+    </div>` : ''}
     <div class="card">
       <h3>基本设置（保存后自动重建容器，数据不受影响）</h3>
       <div class="form-row"><label>实例名称</label><input class="inp" id="set-name" value="${esc(i.name)}"></div>
@@ -1494,6 +1499,53 @@ async function renderSettings() {
       <div class="mono">镜像：${esc(i.image)}<br>数据目录：${esc(i.dataDir)}<br>端口：${esc(i.ports.join(', '))}</div>
     </div>`;
   loadGameCfg();
+  if (i.game === 'minecraft') loadWorlds();
+}
+
+/* ----- Minecraft 世界管理 ----- */
+async function loadWorlds() {
+  const box = $('#worlds-body');
+  if (!box) return;
+  const r = await api(`/instances/${CUR.id}/worlds`);
+  if (!box) return;
+  if (r.code !== 0) { box.textContent = r.msg; return; }
+  const d = r.data;
+  const eb = $('#eula-badge');
+  if (eb) {
+    if (d.eula === 'true') { eb.textContent = 'EULA 已接受'; eb.className = 'badge badge-ok'; }
+    else if (d.eula === 'false') { eb.textContent = 'EULA 未接受'; eb.className = 'badge bad'; }
+    else { eb.textContent = 'EULA 未生成'; eb.className = 'badge badge-off'; }
+  }
+  const rows = (d.worlds || []).map(w => `
+    <tr>
+      <td><b>${esc(w.label)}</b> <span class="muted mono" style="font-size:11px">${esc(w.name)}/</span></td>
+      <td class="mono">${w.sizeMB} MB</td>
+      <td>${w.saved ? '<span class="badge badge-ok">有存档</span>' : w.fresh ? '<span class="badge badge-off">未保存</span>' : '<span class="badge badge-warn">初始化</span>'}</td>
+      <td>
+        ${ME.role === 'admin' ? `<button class="btn small danger" onclick="resetWorld('${esc(w.name)}', ${JSON.stringify(w.label).replace(/"/g, '&quot;')})">重置世界</button>` : '<span class="muted">—</span>'}
+      </td>
+    </tr>`).join('');
+  box.innerHTML = (d.worlds || []).length
+    ? `<table class="tbl"><tr><th>世界</th><th>大小</th><th>状态</th><th>操作</th></tr>${rows}</table>
+       <div class="muted" style="font-size:12px;margin-top:8px">重置 = 删除该世界目录，下次启动自动生成新世界；重置前自动做全量保护备份（备份页可恢复）。</div>`
+    : emptyState('🌍', '尚未生成世界', '启动实例后自动创建主世界/下界/末地');
+}
+
+function resetWorld(name, label) {
+  modal(`重置世界「${esc(label)}」`, `
+    <p>将删除 <b class="mono">${esc(name)}/</b> 的全部存档，下次启动生成全新世界。</p>
+    <p class="muted">重置前会自动创建全量保护备份（可在备份页恢复）；要求实例处于停止状态。</p>
+    <p style="color:var(--red)">⚠️ 世界内的建筑、背包、进度将全部消失，确定继续？</p>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal()">取消</button>
+      <button class="btn danger" id="world-reset-ok" onclick="doResetWorld('${esc(name)}')">确认重置</button>
+    </div>`);
+}
+
+async function doResetWorld(name) {
+  const r = await api(`/instances/${CUR.id}/worlds/${name}/reset`, { method: 'POST' });
+  toast(r.msg, r.code === 0 ? 'ok' : 'err');
+  if (r.code === 0) { closeModal(); setTimeout(loadWorlds, 800); }
 }
 
 /* ----- 游戏专属配置 ----- */
